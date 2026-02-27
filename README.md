@@ -69,7 +69,7 @@ Configuration is saved locally in `.ai-workflow/config.json`.
 | `ai-workflow init` | Interactive setup wizard |
 | `ai-workflow config` | View current configuration |
 | `ai-workflow doctor` | Health check — verify providers and setup |
-| `ai-workflow run <task>` | Run a workflow task *(coming in Phase 2)* |
+| `ai-workflow run <task>` | Run a workflow task |
 
 ---
 
@@ -165,10 +165,10 @@ Contributions are welcome! Here's how to get started:
 
 ## Roadmap
 
-- [x] Phase 1: Project scaffolding, config system, LLM provider layer
-- [ ] Phase 2: Workflow engine, agent implementations, Git integration
-- [ ] Phase 3: QA agent, configurable policies, prompt library
-- [ ] Future: Desktop GUI, VSCode extension, team collaboration
+- **Phase 1** — Project scaffolding, config system, LLM provider layer
+- **Phase 2** — Workflow engine, agent implementations, Git integration
+- **Phase 3** — QA policies, prompt customization, token tracking
+- **Future** — Desktop GUI, VSCode extension, team collaboration
 
 ---
 

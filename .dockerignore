@@ -1,0 +1,10 @@
+node_modules
+dist
+.ai-workflow
+.git
+plan
+*.pdf
+*.log
+DEVELOPMENT.md
+ARCHITECTURE.md
+welcome-ai-agent.md

@@ -33,6 +33,7 @@ npm-debug.log*
 plan/
 ARCHITECTURE.md
 DEVELOPMENT.md
+welcome-ai-agent.md
 *.pdf
 DEEPSEEK_*.txt
 deepseek_*.md

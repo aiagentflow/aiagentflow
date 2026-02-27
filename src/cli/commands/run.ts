@@ -1,19 +1,21 @@
 /**
- * `ai-workflow run` — Execute a workflow task (stub for Phase 2).
+ * `ai-workflow run` — Execute a workflow task.
  *
- * Dependency direction: run.ts → commander
+ * Orchestrates the full agent pipeline for a given task.
+ *
+ * Dependency direction: run.ts → commander, workflow/runner, config/manager
  * Used by: cli/index.ts
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import { configExists } from '../../core/config/manager.js';
+import { runWorkflow } from '../../core/workflow/runner.js';
 import { logger } from '../../utils/logger.js';
 
 export const runCommand = new Command('run')
     .description('Run an AI workflow task')
     .argument('<task>', 'Task description or path to spec file')
-    .action((task: string) => {
+    .action(async (task: string) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
@@ -21,10 +23,14 @@ export const runCommand = new Command('run')
             process.exit(1);
         }
 
-        logger.header('AI Workflow — Run Task');
-        console.log(chalk.gray(`Task: ${task}`));
-        console.log();
-        console.log(chalk.yellow('⚠ The workflow engine is coming in Phase 2.'));
-        console.log(chalk.gray('  This command will orchestrate: Architect → Coder → Reviewer → Tester → Fixer → Judge'));
-        console.log();
+        try {
+            const result = await runWorkflow({ projectRoot, task });
+
+            if (result.state === 'failed') {
+                process.exit(1);
+            }
+        } catch (err) {
+            logger.error(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+            process.exit(1);
+        }
     });
