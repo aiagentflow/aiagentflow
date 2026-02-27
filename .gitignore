@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# Generated config (user-specific)
+.ai-workflow/
+
+# Logs
+*.log
+npm-debug.log*
+
+# ── Internal reference docs (local only, never committed) ──
+plan/
+ARCHITECTURE.md
+DEVELOPMENT.md
+*.pdf
+DEEPSEEK_*.txt
+deepseek_*.md
+deepseek_*.txt
+.gemini/
