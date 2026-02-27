@@ -15,9 +15,9 @@ import ora from 'ora';
 import { configExists, saveConfig, getDefaultConfig, getConfigPath } from '../../core/config/manager.js';
 import type { AppConfig } from '../../core/config/types.js';
 import { ALL_AGENT_ROLES, AGENT_ROLE_LABELS } from '../../agents/types.js';
-import type { AgentRole } from '../../agents/types.js';
 import type { LLMProviderName } from '../../providers/types.js';
 import { getSupportedProviders } from '../../providers/registry.js';
+import { generateDefaultPrompts } from '../../prompts/library.js';
 import { logger } from '../../utils/logger.js';
 
 export const initCommand = new Command('init')
@@ -49,6 +49,7 @@ export const initCommand = new Command('init')
             const config = getDefaultConfig();
             const spinner = ora('Saving configuration...').start();
             saveConfig(projectRoot, config);
+            generateDefaultPrompts(projectRoot);
             spinner.succeed(`Configuration saved to ${getConfigPath(projectRoot)}`);
             logger.success('Setup complete! Run "ai-workflow doctor" to verify your setup.');
             return;
@@ -64,6 +65,7 @@ export const initCommand = new Command('init')
 
         const spinner = ora('Saving configuration...').start();
         saveConfig(projectRoot, config);
+        generateDefaultPrompts(projectRoot);
         spinner.succeed(`Configuration saved to ${getConfigPath(projectRoot)}`);
 
         console.log();
