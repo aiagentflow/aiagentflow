@@ -81,7 +81,7 @@ const VALID_TRANSITIONS: Record<WorkflowStateValue, WorkflowStateValue[]> = {
     idle: ['spec_created', 'failed'],
     spec_created: ['plan_approved', 'failed'],
     plan_approved: ['code_generated', 'failed'],
-    code_generated: ['review_done', 'failed'],
+    code_generated: ['review_done', 'code_generated', 'failed'], // can self-loop on rejection
     review_done: ['tests_written', 'code_generated', 'failed'], // can loop back to coding
     tests_written: ['tests_passed', 'tests_failed', 'failed'],
     tests_passed: ['qa_approved', 'failed'],
