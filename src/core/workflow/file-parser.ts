@@ -63,6 +63,38 @@ export function parseFiles(output: string): ParsedFile[] {
         }
     }
 
+    // Pattern 3: Code block with "// filename.ts" or "# filename.py" as first line
+    if (files.length === 0) {
+        const codeBlockPattern = /```\w*\n([\s\S]*?)```/g;
+        match = codeBlockPattern.exec(output);
+        while (match !== null) {
+            const content = match[1] ?? '';
+            const firstLine = content.split('\n')[0]?.trim() ?? '';
+
+            // Extract filename from "// filename.ts" or "# filename.py" comments
+            const commentMatch = firstLine.match(/^(?:\/\/|#)\s*(.+\.\w+)\s*$/);
+            if (commentMatch?.[1]) {
+                files.push({ path: commentMatch[1], content });
+            }
+            match = codeBlockPattern.exec(output);
+        }
+    }
+
+    // Pattern 4: Markdown heading with filename before code block
+    // e.g., **hello.ts** or ### hello.ts followed by ```
+    if (files.length === 0) {
+        const headingPattern = /(?:\*\*|#{1,4}\s*)([^\s*]+\.\w+)\*{0,2}\s*\n+```\w*\n([\s\S]*?)```/g;
+        match = headingPattern.exec(output);
+        while (match !== null) {
+            const path = match[1]?.trim();
+            const content = match[2];
+            if (path && content) {
+                files.push({ path, content });
+            }
+            match = headingPattern.exec(output);
+        }
+    }
+
     return files;
 }
 

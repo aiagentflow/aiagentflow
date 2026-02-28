@@ -1,5 +1,5 @@
 /**
- * `ai-agent-flow doctor` — Health check for providers and setup.
+ * `aiagentflow doctor` — Health check for providers and setup.
  *
  * Verifies that all configured providers can connect and that
  * the project is properly set up.
@@ -27,7 +27,7 @@ export const doctorCommand = new Command('doctor')
         console.log(
             configCheck
                 ? chalk.green('  ✔ Configuration file found')
-                : chalk.red('  ✘ No configuration file — run "ai-agent-flow init"'),
+                : chalk.red('  ✘ No configuration file — run "aiagentflow init"'),
         );
 
         if (!configCheck) {

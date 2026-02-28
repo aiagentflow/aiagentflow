@@ -105,7 +105,7 @@ describe('workflowConfigSchema', () => {
             expect(result.data.maxIterations).toBe(5);
             expect(result.data.humanApproval).toBe(true);
             expect(result.data.autoCreateBranch).toBe(true);
-            expect(result.data.branchPrefix).toBe('ai-agent-flow/');
+            expect(result.data.branchPrefix).toBe('aiagentflow/');
             expect(result.data.autoRunTests).toBe(true);
         }
     });

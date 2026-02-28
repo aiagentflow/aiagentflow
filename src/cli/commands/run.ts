@@ -1,5 +1,5 @@
 /**
- * `ai-agent-flow run` — Execute a workflow task or batch of tasks.
+ * `aiagentflow run` — Execute a workflow task or batch of tasks.
  *
  * Supports single tasks, batch mode from a file, and autonomous mode.
  *
@@ -24,7 +24,7 @@ export const runCommand = new Command('run')
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
-            logger.error('No configuration found. Run "ai-agent-flow init" first.');
+            logger.error('No configuration found. Run "aiagentflow init" first.');
             process.exit(1);
         }
 

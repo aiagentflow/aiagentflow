@@ -1,5 +1,5 @@
 /**
- * `ai-agent-flow config` — View or edit configuration.
+ * `aiagentflow config` — View or edit configuration.
  *
  * Dependency direction: config.ts → commander, config module
  * Used by: cli/index.ts
@@ -17,7 +17,7 @@ export const configCommand = new Command('config')
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
-            logger.error('No configuration found. Run "ai-agent-flow init" first.');
+            logger.error('No configuration found. Run "aiagentflow init" first.');
             process.exit(1);
         }
 

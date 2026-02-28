@@ -11,7 +11,7 @@ import { parseFiles, writeFiles, parseAndWriteFiles } from '../../../src/core/wo
 let testDir: string;
 
 beforeEach(() => {
-    testDir = join(tmpdir(), `ai-agent-flow-fp-test-${Date.now()}`);
+    testDir = join(tmpdir(), `aiagentflow-fp-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
 });
 
@@ -57,6 +57,45 @@ console.log("hi");
         const files = parseFiles(output);
         expect(files).toHaveLength(1);
         expect(files[0].path).toBe('src/index.ts');
+    });
+
+    it('parses code blocks with // filename.ts comment on first line', () => {
+        const output = `Here is the implementation:
+
+\`\`\`typescript
+// hello.ts
+export function hello(name: string): string {
+  return \`Hello, \${name}!\`;
+}
+\`\`\``;
+
+        const files = parseFiles(output);
+        expect(files).toHaveLength(1);
+        expect(files[0].path).toBe('hello.ts');
+        expect(files[0].content).toContain('hello(name');
+    });
+
+    it('parses code blocks with # filename.py comment on first line', () => {
+        const output = `\`\`\`python
+# utils.py
+def greet(name):
+    return f"Hello, {name}"
+\`\`\``;
+
+        const files = parseFiles(output);
+        expect(files).toHaveLength(1);
+        expect(files[0].path).toBe('utils.py');
+    });
+
+    it('parses markdown heading with filename before code block', () => {
+        const output = `**src/greet.ts**
+\`\`\`typescript
+export function greet() { return "hi"; }
+\`\`\``;
+
+        const files = parseFiles(output);
+        expect(files).toHaveLength(1);
+        expect(files[0].path).toBe('src/greet.ts');
     });
 });
 

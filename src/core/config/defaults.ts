@@ -57,13 +57,13 @@ export const DEFAULT_CONFIG: AppConfig = {
         maxIterations: 5,
         humanApproval: true,
         autoCreateBranch: true,
-        branchPrefix: 'ai-agent-flow/',
+        branchPrefix: 'aiagentflow/',
         autoRunTests: true,
     },
 };
 
 /** The directory name where config is stored inside a project. */
-export const CONFIG_DIR_NAME = '.ai-agent-flow';
+export const CONFIG_DIR_NAME = '.aiagentflow';
 
 /** The config file name. */
 export const CONFIG_FILE_NAME = 'config.json';

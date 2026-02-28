@@ -1,10 +1,10 @@
 {
-  "name": "ai-agent-flow",
+  "name": "aiagentflow",
   "version": "0.1.0",
   "description": "A local-first, CLI-driven multi-agent AI software engineering workflow orchestrator",
   "type": "module",
   "bin": {
-    "ai-agent-flow": "./dist/cli/index.js"
+    "aiagentflow": "./dist/cli/index.js"
   },
   "files": [
     "dist",

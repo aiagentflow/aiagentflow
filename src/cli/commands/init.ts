@@ -1,8 +1,8 @@
 /**
- * `ai-agent-flow init` — Interactive setup wizard.
+ * `aiagentflow init` — Interactive setup wizard.
  *
  * Walks the user through configuring providers, models, and workflow settings.
- * Generates `.ai-agent-flow/config.json` in the current project directory.
+ * Generates `.aiagentflow/config.json` in the current project directory.
  *
  * Dependency direction: init.ts → commander, prompts, ora, chalk, config module
  * Used by: cli/index.ts
@@ -51,7 +51,7 @@ export const initCommand = new Command('init')
             saveConfig(projectRoot, config);
             generateDefaultPrompts(projectRoot);
             spinner.succeed(`Configuration saved to ${getConfigPath(projectRoot)}`);
-            logger.success('Setup complete! Run "ai-agent-flow doctor" to verify your setup.');
+            logger.success('Setup complete! Run "aiagentflow doctor" to verify your setup.');
             return;
         }
 
@@ -71,8 +71,8 @@ export const initCommand = new Command('init')
         console.log();
         logger.success('Setup complete!');
         console.log(chalk.gray('  Next steps:'));
-        console.log(chalk.gray('  1. Run "ai-agent-flow doctor" to verify providers'));
-        console.log(chalk.gray('  2. Run "ai-agent-flow run <task>" to start a workflow'));
+        console.log(chalk.gray('  1. Run "aiagentflow doctor" to verify providers'));
+        console.log(chalk.gray('  2. Run "aiagentflow run <task>" to start a workflow'));
         console.log();
     });
 
