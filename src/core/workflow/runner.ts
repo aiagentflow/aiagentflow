@@ -247,8 +247,13 @@ function applyAgentOutput(
 
         case 'fixer': {
             const fixedFiles = parseAndWriteFiles(projectRoot, content);
-            return transition(ctx, {
+            ctx = transition(ctx, {
                 type: 'FIX_APPLIED',
+                payload: { files: fixedFiles.length > 0 ? fixedFiles : ['(no files parsed)'] },
+            });
+            // Auto-transition back to code_generated for re-review
+            return transition(ctx, {
+                type: 'CODE_GENERATED',
                 payload: { files: fixedFiles.length > 0 ? fixedFiles : ['(no files parsed)'] },
             });
         }

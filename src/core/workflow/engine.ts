@@ -20,6 +20,7 @@ export const WorkflowState = {
     PlanApproved: 'plan_approved',
     CodeGenerated: 'code_generated',
     ReviewDone: 'review_done',
+    ReviewRejected: 'review_rejected',
     TestsWritten: 'tests_written',
     TestsPassed: 'tests_passed',
     TestsFailed: 'tests_failed',
@@ -81,12 +82,13 @@ const VALID_TRANSITIONS: Record<WorkflowStateValue, WorkflowStateValue[]> = {
     idle: ['spec_created', 'failed'],
     spec_created: ['plan_approved', 'failed'],
     plan_approved: ['code_generated', 'failed'],
-    code_generated: ['review_done', 'code_generated', 'failed'], // can self-loop on rejection
-    review_done: ['tests_written', 'code_generated', 'failed'], // can loop back to coding
+    code_generated: ['review_done', 'review_rejected', 'failed'],
+    review_done: ['tests_written', 'failed'],
+    review_rejected: ['fix_applied', 'failed'], // fixer runs → fix_applied → code_generated
     tests_written: ['tests_passed', 'tests_failed', 'failed'],
     tests_passed: ['qa_approved', 'failed'],
     tests_failed: ['fix_applied', 'failed'],
-    fix_applied: ['review_done', 'code_generated', 'failed'], // loops back
+    fix_applied: ['code_generated', 'failed'], // loops back to reviewer via code_generated
     qa_approved: ['complete'],
     complete: [],
     failed: [],
@@ -99,6 +101,7 @@ export const STATE_AGENT_MAP: Partial<Record<WorkflowStateValue, AgentRole>> = {
     plan_approved: 'coder',
     code_generated: 'reviewer',
     review_done: 'tester',
+    review_rejected: 'fixer',
     tests_failed: 'fixer',
     tests_passed: 'judge',
 };
@@ -142,7 +145,7 @@ export function transition(
     }
 
     // Check iteration limit on fix loops
-    const isFixLoop = nextState === 'fix_applied' || (nextState === 'code_generated' && currentState === 'review_done');
+    const isFixLoop = nextState === 'review_rejected' || (nextState === 'fix_applied' && currentState === 'tests_failed');
     const newIteration = isFixLoop ? context.iteration + 1 : context.iteration;
 
     if (newIteration > context.maxIterations) {
@@ -217,7 +220,7 @@ function resolveNextState(current: WorkflowStateValue, event: WorkflowEvent): Wo
         case 'PLAN_APPROVED': return WorkflowState.PlanApproved;
         case 'CODE_GENERATED': return WorkflowState.CodeGenerated;
         case 'REVIEW_DONE':
-            return event.payload.approved ? WorkflowState.ReviewDone : WorkflowState.CodeGenerated;
+            return event.payload.approved ? WorkflowState.ReviewDone : WorkflowState.ReviewRejected;
         case 'TESTS_WRITTEN': return WorkflowState.TestsWritten;
         case 'TESTS_PASSED': return WorkflowState.TestsPassed;
         case 'TESTS_FAILED': return WorkflowState.TestsFailed;

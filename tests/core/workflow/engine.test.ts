@@ -66,16 +66,17 @@ describe('transition', () => {
         expect(isTerminal(ctx)).toBe(false);
     });
 
-    it('handles review rejection by looping back to coder', () => {
+    it('handles review rejection by sending to fixer', () => {
         let ctx = createWorkflowContext('task');
         ctx = transition(ctx, { type: 'SPEC_READY', payload: { spec: 'spec' } });
         ctx = transition(ctx, { type: 'PLAN_APPROVED', payload: { plan: 'plan' } });
         ctx = transition(ctx, { type: 'CODE_GENERATED', payload: { files: ['app.ts'] } });
 
-        // Reviewer rejects
+        // Reviewer rejects → goes to review_rejected (fixer runs next)
         ctx = transition(ctx, { type: 'REVIEW_DONE', payload: { approved: false, feedback: 'fix imports' } });
-        expect(ctx.state).toBe('code_generated'); // loops back
+        expect(ctx.state).toBe('review_rejected');
         expect(ctx.reviewFeedback).toBe('fix imports');
+        expect(ctx.iteration).toBe(1);
     });
 
     it('handles test failures through fixer loop', () => {
@@ -109,22 +110,19 @@ describe('transition', () => {
         ctx = transition(ctx, { type: 'SPEC_READY', payload: { spec: 'spec' } });
         ctx = transition(ctx, { type: 'PLAN_APPROVED', payload: { plan: 'plan' } });
         ctx = transition(ctx, { type: 'CODE_GENERATED', payload: { files: ['app.ts'] } });
-        ctx = transition(ctx, { type: 'REVIEW_DONE', payload: { approved: true, feedback: 'ok' } });
-        ctx = transition(ctx, { type: 'TESTS_WRITTEN', payload: { testFiles: ['test.ts'] } });
-        ctx = transition(ctx, { type: 'TESTS_FAILED', payload: { failures: 'fail' } });
 
-        // First fix is ok (iteration 1 = maxIterations)
-        ctx = transition(ctx, { type: 'FIX_APPLIED', payload: { files: ['app.ts'] } });
+        // First review rejection counts as iteration 1 (= maxIterations)
+        ctx = transition(ctx, { type: 'REVIEW_DONE', payload: { approved: false, feedback: 'fix it' } });
+        expect(ctx.state).toBe('review_rejected');
         expect(ctx.iteration).toBe(1);
 
-        // Make it loop back to review, then tests fail again
-        ctx = transition(ctx, { type: 'REVIEW_DONE', payload: { approved: true, feedback: 'ok' } });
-        ctx = transition(ctx, { type: 'TESTS_WRITTEN', payload: { testFiles: ['test.ts'] } });
-        ctx = transition(ctx, { type: 'TESTS_FAILED', payload: { failures: 'still failing' } });
+        // Fixer fixes, goes back to code_generated
+        ctx = transition(ctx, { type: 'FIX_APPLIED', payload: { files: ['app.ts'] } });
+        ctx = transition(ctx, { type: 'CODE_GENERATED', payload: { files: ['app.ts'] } });
 
-        // Second fix should exceed max
+        // Second review rejection should exceed max iterations
         expect(() =>
-            transition(ctx, { type: 'FIX_APPLIED', payload: { files: ['app.ts'] } }),
+            transition(ctx, { type: 'REVIEW_DONE', payload: { approved: false, feedback: 'still bad' } }),
         ).toThrow(WorkflowError);
     });
 
