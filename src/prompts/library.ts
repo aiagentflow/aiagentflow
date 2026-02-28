@@ -20,6 +20,7 @@ import { logger } from '../utils/logger.js';
 
 const PROMPTS_DIR = 'prompts';
 const POLICIES_DIR = 'policies';
+const CONTEXT_DIR = 'context';
 
 // ── Default Prompts ──
 
@@ -208,9 +209,11 @@ export function getPoliciesDir(projectRoot: string): string {
 export function generateDefaultPrompts(projectRoot: string): void {
     const promptsDir = getPromptsDir(projectRoot);
     const policiesDir = getPoliciesDir(projectRoot);
+    const contextDir = join(projectRoot, CONFIG_DIR_NAME, CONTEXT_DIR);
 
     ensureDir(promptsDir);
     ensureDir(policiesDir);
+    ensureDir(contextDir);
 
     // Generate agent prompt files
     for (const role of ALL_AGENT_ROLES) {

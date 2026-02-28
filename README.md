@@ -1,6 +1,6 @@
 # aiagentflow
 
-A local-first CLI that orchestrates multi-agent AI workflows for software development. Give it a task — it coordinates specialized agents to architect, code, review, test, and ship automatically.
+A local-first CLI that orchestrates multi-agent AI workflows for software development. Give it a task — or feed it your specs, PRDs, and guidelines — and it coordinates specialized agents to architect, code, review, test, and ship automatically.
 
 **No cloud dependency. Bring your own API keys. Your code stays on your machine.**
 
@@ -46,6 +46,13 @@ aiagentflow run "Add a login form with email/password validation"
 
 # 3. Or run autonomously (no approval prompts)
 aiagentflow run "Refactor the auth module" --auto
+
+# 4. Feed context docs to agents
+aiagentflow run "Add auth" --context docs/api-spec.md docs/security.md
+
+# 5. Generate a task list from specs, then batch-run
+aiagentflow plan docs/prd.md -o tasks.txt
+aiagentflow run --batch tasks.txt --auto
 ```
 
 The `init` wizard walks you through:
@@ -53,6 +60,7 @@ The `init` wizard walks you through:
 2. Enter API keys
 3. Assign models per agent role
 4. Set workflow preferences
+5. Import existing docs (specs, requirements, guidelines) for auto-loading
 
 Configuration is saved locally in `.aiagentflow/config.json`.
 
@@ -61,6 +69,8 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 ## Features
 
 - **Multi-agent pipeline** — 6 specialized agents, each with a distinct role
+- **Context-aware** — feed specs, PRDs, architecture docs, and guidelines to every agent
+- **Plan from docs** — generate batch-ready task lists from your existing documentation
 - **Local-first** — runs entirely on your machine, no code leaves your system
 - **Provider-agnostic** — Anthropic (Claude), Ollama (local models), more coming
 - **Configurable** — tune models, temperature, and iteration limits per agent
@@ -83,7 +93,10 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 | `aiagentflow doctor` | Health check — verify providers and setup |
 | `aiagentflow run <task>` | Run a workflow for a task |
 | `aiagentflow run <task> --auto` | Autonomous mode (no approval prompts) |
+| `aiagentflow run <task> --context <files...>` | Run with reference documents |
 | `aiagentflow run --batch tasks.txt` | Process multiple tasks from a file |
+| `aiagentflow plan <docs...>` | Generate a task list from documentation |
+| `aiagentflow plan <docs...> -o tasks.txt` | Write task list to file (batch-ready) |
 
 ---
 
@@ -142,10 +155,61 @@ After `aiagentflow init`, your project has:
 │   └── judge.md
 ├── policies/                # Quality standards
 │   └── coding-standards.md
+├── context/                 # Reference docs (auto-loaded into every run)
+│   ├── api-spec.md          # Example: your API specification
+│   └── requirements.md      # Example: your PRD or requirements
 └── sessions/                # Saved workflow sessions
 ```
 
-Edit the prompt files to customize how each agent behaves. Edit `coding-standards.md` to set project-specific rules that all agents follow.
+Edit the prompt files to customize how each agent behaves. Edit `coding-standards.md` to set project-specific rules that all agents follow. Drop `.md` or `.txt` files into `context/` and they'll be automatically included as reference material for all agents.
+
+---
+
+## Context Documents
+
+Agents work best when they understand your project's requirements, API contracts, and standards. There are three ways to provide reference documents:
+
+**1. Auto-loaded (recommended)** — Drop files into `.aiagentflow/context/`:
+
+```bash
+cp docs/api-spec.md .aiagentflow/context/
+cp docs/security-guidelines.md .aiagentflow/context/
+aiagentflow run "Implement user registration"
+# Both docs are automatically included in every agent's context
+```
+
+**2. Per-run via `--context` flag:**
+
+```bash
+aiagentflow run "Add OAuth support" --context docs/oauth-spec.md docs/auth-arch.md
+```
+
+**3. During init** — The setup wizard asks if you have existing docs and copies them for you.
+
+### What to include
+
+| Document type | Example | Why it helps |
+|---------------|---------|-------------|
+| API specs | `api-spec.md` | Agents generate correct endpoints and contracts |
+| Requirements / PRDs | `requirements.md` | Architect plans match your actual requirements |
+| Security guidelines | `security.md` | Reviewer catches violations against your policies |
+| Architecture docs | `architecture.md` | Coder follows your patterns and conventions |
+| Development guidelines | `dev-guidelines.md` | All agents follow your team's standards |
+
+### Plan command
+
+Turn documentation into an actionable task list, then batch-run it:
+
+```bash
+# Generate tasks from a PRD
+aiagentflow plan docs/prd.md -o tasks.txt
+
+# Review the generated tasks
+cat tasks.txt
+
+# Run them all
+aiagentflow run --batch tasks.txt --auto --context docs/architecture.md
+```
 
 ---
 
@@ -214,7 +278,8 @@ Contributions are welcome! Here's how to get started:
 - [x] Project scaffolding, config system, LLM provider layer
 - [x] Workflow engine, agent implementations, Git integration
 - [x] QA policies, token tracking, session persistence
-- [ ] Context management for large repositories
+- [x] Context documents — feed specs, PRDs, and guidelines to agents
+- [x] Plan command — generate task lists from documentation
 - [ ] More providers (OpenAI, Groq, Mistral)
 - [ ] VSCode extension
 - [ ] Desktop GUI

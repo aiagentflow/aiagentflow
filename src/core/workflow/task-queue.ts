@@ -37,6 +37,8 @@ export interface QueueOptions {
     auto?: boolean;
     /** Stop the queue on first failure. */
     stopOnFailure?: boolean;
+    /** Explicit context file paths to load. */
+    contextPaths?: string[];
 }
 
 /**
@@ -45,7 +47,7 @@ export interface QueueOptions {
  * Returns the queue with all results after completion.
  */
 export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]> {
-    const { projectRoot, tasks, auto = false, stopOnFailure = false } = options;
+    const { projectRoot, tasks, auto = false, stopOnFailure = false, contextPaths } = options;
 
     const queue: QueuedTask[] = tasks.map(task => ({
         task,
@@ -71,6 +73,7 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
                 projectRoot,
                 task: item.task,
                 auto,
+                contextPaths,
             });
 
             item.result = result;

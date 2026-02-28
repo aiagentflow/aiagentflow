@@ -20,7 +20,8 @@ export const runCommand = new Command('run')
     .option('--auto', 'Autonomous mode — skip all human approval gates')
     .option('--batch', 'Treat the argument as a task list file (one task per line)')
     .option('--stop-on-failure', 'Stop the queue on first failure (batch mode)')
-    .action(async (task: string, options: { auto?: boolean; batch?: boolean; stopOnFailure?: boolean }) => {
+    .option('--context <paths...>', 'Context files to load as reference documents')
+    .action(async (task: string, options: { auto?: boolean; batch?: boolean; stopOnFailure?: boolean; context?: string[] }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
@@ -49,6 +50,7 @@ export const runCommand = new Command('run')
                     tasks,
                     auto: options.auto,
                     stopOnFailure: options.stopOnFailure,
+                    contextPaths: options.context,
                 });
 
                 const failed = results.filter(t => t.status === 'failed').length;
@@ -61,6 +63,7 @@ export const runCommand = new Command('run')
                 projectRoot,
                 task,
                 auto: options.auto,
+                contextPaths: options.context,
             });
 
             if (result.state === 'failed') {
