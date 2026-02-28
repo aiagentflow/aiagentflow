@@ -16,11 +16,12 @@ beforeEach(() => {
 });
 
 describe('getSupportedProviders', () => {
-    it('returns anthropic and ollama', () => {
+    it('returns all supported providers', () => {
         const providers = getSupportedProviders();
         expect(providers).toContain('anthropic');
         expect(providers).toContain('ollama');
-        expect(providers.length).toBe(2);
+        expect(providers).toContain('openai');
+        expect(providers.length).toBe(3);
     });
 });
 

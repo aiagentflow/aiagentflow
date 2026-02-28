@@ -13,6 +13,7 @@
 import type { LLMProvider, LLMProviderName } from './types.js';
 import { AnthropicProvider, type AnthropicProviderConfig } from './anthropic.js';
 import { OllamaProvider, type OllamaProviderConfig } from './ollama.js';
+import { OpenAIProvider, type OpenAIProviderConfig } from './openai.js';
 import type { ProviderConfig } from '../core/config/types.js';
 import { ProviderError } from '../core/errors.js';
 import { logger } from '../utils/logger.js';
@@ -36,6 +37,17 @@ const PROVIDER_FACTORIES: Record<LLMProviderName, (config: ProviderConfig) => LL
     ollama: (config: ProviderConfig) => {
         const ollamaConfig = config.ollama;
         return new OllamaProvider(ollamaConfig as OllamaProviderConfig | undefined);
+    },
+
+    openai: (config: ProviderConfig) => {
+        const openaiConfig = config.openai;
+        if (!openaiConfig) {
+            throw new ProviderError(
+                'OpenAI provider is not configured. Run "aiagentflow init" to set up.',
+                { provider: 'openai' },
+            );
+        }
+        return new OpenAIProvider(openaiConfig as OpenAIProviderConfig);
     },
 };
 
@@ -95,7 +107,7 @@ export async function validateAllProviders(
     for (const name of getSupportedProviders()) {
         try {
             // Only validate providers that are actually configured
-            if (name === 'anthropic' && !config.anthropic) {
+            if ((name === 'anthropic' && !config.anthropic) || (name === 'openai' && !config.openai)) {
                 results[name] = false;
                 continue;
             }

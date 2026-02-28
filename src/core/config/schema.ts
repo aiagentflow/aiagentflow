@@ -15,7 +15,7 @@ import { z } from 'zod';
  */
 export const agentRoleConfigSchema = z.object({
     /** Which provider to use for this agent role. */
-    provider: z.enum(['anthropic', 'ollama']),
+    provider: z.enum(['anthropic', 'ollama', 'openai']),
     /** The model identifier to use. */
     model: z.string().min(1),
     /** Sampling temperature (0.0 = deterministic, higher = more creative). */
@@ -53,11 +53,21 @@ export const ollamaProviderSchema = z.object({
 });
 
 /**
+ * Schema for OpenAI provider settings.
+ */
+export const openaiProviderSchema = z.object({
+    apiKey: z.string().min(1, 'OpenAI API key is required'),
+    baseUrl: z.string().url().default('https://api.openai.com'),
+    organization: z.string().optional(),
+});
+
+/**
  * Schema for provider configuration (all providers).
  */
 export const providerConfigSchema = z.object({
     anthropic: anthropicProviderSchema.optional(),
     ollama: ollamaProviderSchema.optional(),
+    openai: openaiProviderSchema.optional(),
 });
 
 /**

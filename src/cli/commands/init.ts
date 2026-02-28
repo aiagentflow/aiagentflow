@@ -134,7 +134,9 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         name: 'providers',
         message: 'Select LLM providers to configure (space to toggle, enter to confirm):',
         choices: availableProviders.map((p) => ({
-            title: p === 'anthropic' ? 'Anthropic (Claude) — requires API key' : 'Ollama (Local Models) — free, no API key needed',
+            title: p === 'anthropic' ? 'Anthropic (Claude) — requires API key'
+                 : p === 'openai' ? 'OpenAI (GPT) — requires API key'
+                 : 'Ollama (Local Models) — free, no API key needed',
             value: p,
             selected: p === 'ollama',
         })),
@@ -166,6 +168,24 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         };
     }
 
+    if (selectedProviders.includes('openai')) {
+        const openaiAnswers = await prompts([
+            {
+                type: 'password',
+                name: 'apiKey',
+                message: 'OpenAI API key:',
+                validate: (val: string) => val.length >= 8 || 'API key seems too short',
+            },
+        ]);
+
+        if (!openaiAnswers.apiKey) return null;
+
+        config.providers.openai = {
+            apiKey: openaiAnswers.apiKey,
+            baseUrl: 'https://api.openai.com',
+        };
+    }
+
     if (selectedProviders.includes('ollama')) {
         const ollamaAnswers = await prompts({
             type: 'text',
@@ -186,10 +206,14 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
 
     // Helper to get default model for a provider
     const getDefaultModel = (p: LLMProviderName) =>
-        p === 'anthropic' ? 'claude-sonnet-4-20250514' : 'llama3.2:latest';
+        p === 'anthropic' ? 'claude-sonnet-4-20250514'
+        : p === 'openai' ? 'gpt-4o-mini'
+        : 'llama3.2:latest';
 
     const providerLabel = (p: LLMProviderName) =>
-        p === 'anthropic' ? 'Anthropic (Claude)' : 'Ollama (Local)';
+        p === 'anthropic' ? 'Anthropic (Claude)'
+        : p === 'openai' ? 'OpenAI (GPT)'
+        : 'Ollama (Local)';
 
     if (hasMixableProviders) {
         // Multiple providers — let user choose assignment strategy
@@ -236,7 +260,9 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
 
         } else if (assignmentMode === 'smart') {
             // Reasoning roles → cloud (anthropic), generation roles → local (ollama)
-            const cloudProvider = selectedProviders.includes('anthropic') ? 'anthropic' : selectedProviders[0]!;
+            const cloudProvider = selectedProviders.includes('anthropic') ? 'anthropic'
+                : selectedProviders.includes('openai') ? 'openai'
+                : selectedProviders[0]!;
             const localProvider = selectedProviders.includes('ollama') ? 'ollama' : selectedProviders[0]!;
 
             const reasoningRoles: AgentRole[] = ['architect', 'reviewer', 'judge'];

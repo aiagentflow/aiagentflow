@@ -39,7 +39,7 @@ describe('agentRoleConfigSchema', () => {
 
     it('rejects invalid provider', () => {
         const result = agentRoleConfigSchema.safeParse({
-            provider: 'openai',
+            provider: 'invalid-provider',
             model: 'gpt-4',
         });
         expect(result.success).toBe(false);

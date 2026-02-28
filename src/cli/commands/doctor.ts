@@ -52,7 +52,9 @@ export const doctorCommand = new Command('doctor')
                 console.log(chalk.green(`  ✔ ${name} — connected`));
             } else {
                 const isConfigured =
-                    name === 'anthropic' ? !!config.providers.anthropic : !!config.providers.ollama;
+                    name === 'anthropic' ? !!config.providers.anthropic
+                    : name === 'openai' ? !!config.providers.openai
+                    : !!config.providers.ollama;
 
                 if (isConfigured) {
                     console.log(chalk.red(`  ✘ ${name} — connection failed`));
