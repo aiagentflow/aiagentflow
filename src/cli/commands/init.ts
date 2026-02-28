@@ -132,11 +132,11 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     const providerAnswers = await prompts({
         type: 'multiselect',
         name: 'providers',
-        message: 'Select LLM providers to configure:',
+        message: 'Select LLM providers to configure (space to toggle, enter to confirm):',
         choices: availableProviders.map((p) => ({
-            title: p === 'anthropic' ? 'Anthropic (Claude)' : 'Ollama (Local Models)',
+            title: p === 'anthropic' ? 'Anthropic (Claude) — requires API key' : 'Ollama (Local Models) — free, no API key needed',
             value: p,
-            selected: true,
+            selected: p === 'ollama',
         })),
         min: 1,
     });
@@ -182,7 +182,25 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     // ── Step 4: Agent Model Assignment ──
     logger.step(4, 6, 'Agent Model Assignment');
 
-    const defaultProvider = selectedProviders.includes('anthropic') ? 'anthropic' : 'ollama';
+    let defaultProvider: LLMProviderName;
+
+    if (selectedProviders.length === 1) {
+        defaultProvider = selectedProviders[0]!;
+    } else {
+        const { preferredProvider } = await prompts({
+            type: 'select',
+            name: 'preferredProvider',
+            message: 'Which provider should be the default for all agents?',
+            choices: selectedProviders.map((p) => ({
+                title: p === 'anthropic' ? 'Anthropic (Claude)' : 'Ollama (Local Models)',
+                value: p,
+            })),
+        });
+
+        if (!preferredProvider) return null;
+        defaultProvider = preferredProvider;
+    }
+
     const defaultModel = defaultProvider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'llama3.2:latest';
 
     console.log(chalk.gray(`  Default: ${defaultProvider} / ${defaultModel}`));
