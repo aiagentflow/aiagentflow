@@ -29,6 +29,7 @@ import { requestApproval, needsApproval } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
 import { saveSession } from './session.js';
 import { loadQAPolicy, evaluateReview, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
+import { loadContextDocuments, formatContextForAgent, type ContextDocument } from './context-loader.js';
 import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
@@ -41,6 +42,8 @@ export interface RunOptions {
     task: string;
     /** Skip all human approval gates (autonomous mode). */
     auto?: boolean;
+    /** Explicit context file paths to load. */
+    contextPaths?: string[];
 }
 
 /**
@@ -50,10 +53,11 @@ export interface RunOptions {
  * Returns the final workflow context with all accumulated data.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task, auto = false } = options;
+    const { projectRoot, task, auto = false, contextPaths } = options;
     const config = loadConfig(projectRoot);
     const tokenTracker = new TokenTracker();
     const qaPolicy = loadQAPolicy(projectRoot);
+    const contextDocs = loadContextDocuments(projectRoot, contextPaths);
 
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
@@ -99,7 +103,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             try {
                 const output = await agent.execute({
                     task: ctx.task,
-                    context: buildAgentContext(ctx, qaPolicy),
+                    context: buildAgentContext(ctx, qaPolicy, contextDocs),
                     previousOutput: getLatestOutput(ctx),
                 });
 
@@ -159,8 +163,13 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 // ── Private helpers ──
 
 /** Build context string for the current agent based on workflow state. */
-function buildAgentContext(ctx: WorkflowContext, qaPolicy?: QAPolicy): string {
+function buildAgentContext(ctx: WorkflowContext, qaPolicy?: QAPolicy, contextDocs?: ContextDocument[]): string {
     const parts: string[] = [];
+
+    // Inject reference documents first so all agents see them
+    if (contextDocs && contextDocs.length > 0) {
+        parts.push(formatContextForAgent(contextDocs));
+    }
 
     if (ctx.spec) parts.push(`## Spec\n${ctx.spec}`);
     if (ctx.plan) parts.push(`## Plan\n${ctx.plan}`);

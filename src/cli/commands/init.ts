@@ -12,12 +12,16 @@ import { Command } from 'commander';
 import prompts from 'prompts';
 import chalk from 'chalk';
 import ora from 'ora';
+import { existsSync, copyFileSync } from 'node:fs';
+import { join, basename, resolve } from 'node:path';
 import { configExists, saveConfig, getDefaultConfig, getConfigPath } from '../../core/config/manager.js';
+import { CONFIG_DIR_NAME } from '../../core/config/defaults.js';
 import type { AppConfig } from '../../core/config/types.js';
 import { ALL_AGENT_ROLES, AGENT_ROLE_LABELS } from '../../agents/types.js';
 import type { LLMProviderName } from '../../providers/types.js';
 import { getSupportedProviders } from '../../providers/registry.js';
 import { generateDefaultPrompts } from '../../prompts/library.js';
+import { ensureDir } from '../../utils/fs.js';
 import { logger } from '../../utils/logger.js';
 
 export const initCommand = new Command('init')
@@ -72,7 +76,9 @@ export const initCommand = new Command('init')
         logger.success('Setup complete!');
         console.log(chalk.gray('  Next steps:'));
         console.log(chalk.gray('  1. Run "aiagentflow doctor" to verify providers'));
-        console.log(chalk.gray('  2. Run "aiagentflow run <task>" to start a workflow'));
+        console.log(chalk.gray('  2. Drop docs in .aiagentflow/context/ for auto-loaded context'));
+        console.log(chalk.gray('  3. Run "aiagentflow run <task>" to start a workflow'));
+        console.log(chalk.gray('  4. Run "aiagentflow plan <doc>" to generate a task list from specs'));
         console.log();
     });
 
@@ -84,7 +90,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     const availableProviders = getSupportedProviders();
 
     // ── Step 1: Project Detection ──
-    logger.step(1, 5, 'Project Settings');
+    logger.step(1, 6, 'Project Settings');
     const projectAnswers = await prompts([
         {
             type: 'select',
@@ -122,7 +128,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     config.project.testFramework = projectAnswers.testFramework;
 
     // ── Step 2: Provider Selection ──
-    logger.step(2, 5, 'LLM Providers');
+    logger.step(2, 6, 'LLM Providers');
     const providerAnswers = await prompts({
         type: 'multiselect',
         name: 'providers',
@@ -139,7 +145,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     const selectedProviders = providerAnswers.providers as LLMProviderName[];
 
     // ── Step 3: Provider Configuration ──
-    logger.step(3, 5, 'Provider Settings');
+    logger.step(3, 6, 'Provider Settings');
 
     if (selectedProviders.includes('anthropic')) {
         const anthropicAnswers = await prompts([
@@ -174,7 +180,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     }
 
     // ── Step 4: Agent Model Assignment ──
-    logger.step(4, 5, 'Agent Model Assignment');
+    logger.step(4, 6, 'Agent Model Assignment');
 
     const defaultProvider = selectedProviders.includes('anthropic') ? 'anthropic' : 'ollama';
     const defaultModel = defaultProvider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'llama3.2:latest';
@@ -228,7 +234,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     }
 
     // ── Step 5: Workflow Settings ──
-    logger.step(5, 5, 'Workflow Settings');
+    logger.step(5, 6, 'Workflow Settings');
     const workflowAnswers = await prompts([
         {
             type: 'number',
@@ -255,6 +261,54 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     config.workflow.maxIterations = workflowAnswers.maxIterations ?? 5;
     config.workflow.humanApproval = workflowAnswers.humanApproval ?? true;
     config.workflow.autoCreateBranch = workflowAnswers.autoCreateBranch ?? true;
+
+    // ── Step 6: Context Documents ──
+    logger.step(6, 6, 'Context Documents');
+    console.log(chalk.gray('  Agents perform better with reference docs (specs, PRDs, guidelines).'));
+    console.log(chalk.gray('  Files added here are auto-loaded into every workflow run.'));
+    console.log();
+
+    const { hasContextDocs } = await prompts({
+        type: 'confirm',
+        name: 'hasContextDocs',
+        message: 'Do you have existing specs, requirements, or guidelines to include?',
+        initial: false,
+    });
+
+    if (hasContextDocs) {
+        const { docPaths } = await prompts({
+            type: 'list',
+            name: 'docPaths',
+            message: 'Paths to doc files (comma-separated):',
+            separator: ',',
+        });
+
+        if (docPaths && docPaths.length > 0) {
+            const contextDir = join(projectRoot, CONFIG_DIR_NAME, 'context');
+            ensureDir(contextDir);
+
+            let copied = 0;
+            for (const rawPath of docPaths) {
+                const trimmed = rawPath.trim();
+                if (!trimmed) continue;
+
+                const resolved = resolve(projectRoot, trimmed);
+                if (!existsSync(resolved)) {
+                    logger.warn(`File not found, skipping: ${trimmed}`);
+                    continue;
+                }
+
+                const dest = join(contextDir, basename(resolved));
+                copyFileSync(resolved, dest);
+                logger.debug(`Copied ${trimmed} → .aiagentflow/context/${basename(resolved)}`);
+                copied++;
+            }
+
+            if (copied > 0) {
+                logger.success(`Copied ${copied} document(s) to .aiagentflow/context/`);
+            }
+        }
+    }
 
     return config;
 }

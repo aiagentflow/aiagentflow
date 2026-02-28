@@ -12,6 +12,7 @@ import { initCommand } from './commands/init.js';
 import { configCommand } from './commands/config.js';
 import { doctorCommand } from './commands/doctor.js';
 import { runCommand } from './commands/run.js';
+import { planCommand } from './commands/plan.js';
 
 const program = new Command();
 
@@ -25,5 +26,6 @@ program.addCommand(initCommand);
 program.addCommand(configCommand);
 program.addCommand(doctorCommand);
 program.addCommand(runCommand);
+program.addCommand(planCommand);
 
 program.parse();
