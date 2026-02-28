@@ -223,21 +223,37 @@ export class OllamaProvider implements LLMProvider {
         return result;
     }
 
-    private async request(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    private async request(path: string, body: Record<string, unknown>, retries = 2): Promise<Record<string, unknown>> {
         let response: Response;
+        let lastError: unknown;
 
-        try {
-            response = await fetch(`${this.baseUrl}${path}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-        } catch (err) {
-            throw new ProviderError(
-                `Failed to connect to Ollama at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
-                { provider: 'ollama', baseUrl: this.baseUrl },
-            );
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                response = await fetch(`${this.baseUrl}${path}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                    signal: AbortSignal.timeout(300_000), // 5 minute timeout
+                });
+
+                // Success — continue to response handling below
+                break;
+            } catch (err) {
+                lastError = err;
+                if (attempt < retries) {
+                    logger.debug(`Ollama request failed (attempt ${attempt + 1}/${retries + 1}), retrying...`);
+                    await new Promise(r => setTimeout(r, 2000));
+                    continue;
+                }
+                throw new ProviderError(
+                    `Failed to connect to Ollama at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+                    { provider: 'ollama', baseUrl: this.baseUrl },
+                );
+            }
         }
+
+        // TypeScript needs this — response is always assigned if we reach here
+        response = response!;
 
         if (!response.ok) {
             const errorBody = await response.text();
