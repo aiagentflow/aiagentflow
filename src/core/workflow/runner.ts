@@ -6,6 +6,7 @@
  * 2. Determines which agent to run next
  * 3. Executes agents and feeds output to the workflow engine
  * 4. Handles transitions, loops, and terminal states
+ * 5. Tracks token usage and persists session state
  *
  * Dependency direction: runner.ts → engine, agents/factory, git/client, config
  * Used by: cli/commands/run.ts
@@ -25,6 +26,8 @@ import { GitClient } from '../../git/client.js';
 import { parseAndWriteFiles } from './file-parser.js';
 import { runTests } from './test-runner.js';
 import { requestApproval, needsApproval } from './approval.js';
+import { TokenTracker } from './token-tracker.js';
+import { saveSession } from './session.js';
 import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
@@ -35,6 +38,8 @@ export interface RunOptions {
     projectRoot: string;
     /** The task to accomplish. */
     task: string;
+    /** Skip all human approval gates (autonomous mode). */
+    auto?: boolean;
 }
 
 /**
@@ -44,11 +49,15 @@ export interface RunOptions {
  * Returns the final workflow context with all accumulated data.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task } = options;
+    const { projectRoot, task, auto = false } = options;
     const config = loadConfig(projectRoot);
+    const tokenTracker = new TokenTracker();
 
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
+    if (auto) {
+        console.log(chalk.yellow('⚡ Autonomous mode — no human approval required'));
+    }
     console.log();
 
     // Optional: create a Git branch for this task
@@ -64,6 +73,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 
     // Create workflow context
     let ctx = createWorkflowContext(task, config.workflow.maxIterations);
+    let sessionId: string | undefined;
     let lastOutput = '';
 
     try {
@@ -81,6 +91,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             }
 
             const agent = createAgent(agentRole, config, projectRoot);
+            const agentConfig = config.agents[agentRole];
             const spinner = ora(`Running ${agentRole} agent...`).start();
 
             try {
@@ -93,6 +104,13 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
                 spinner.succeed(`${agentRole} complete (${output.tokensUsed} tokens)`);
                 lastOutput = output.content;
 
+                // Track token usage
+                tokenTracker.record(agentRole, agentConfig.model, {
+                    promptTokens: 0, // TODO: Get from provider response
+                    completionTokens: output.tokensUsed,
+                    totalTokens: output.tokensUsed,
+                });
+
                 // Transition based on agent output
                 ctx = applyAgentOutput(ctx, agentRole, output.content, config, projectRoot);
             } catch (err) {
@@ -104,17 +122,19 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
                 ctx = transition(ctx, { type: 'ABORT', payload: { reason: String(err) } });
             }
 
-            // Human approval gate
-            if (needsApproval(config.workflow.humanApproval, ctx.state) && !isTerminal(ctx)) {
+            // Save session after each step (crash recovery)
+            sessionId = saveSession(projectRoot, ctx, tokenTracker.getEntries() as any[], sessionId);
+
+            // Human approval gate (skipped in autonomous mode)
+            const shouldApprove = !auto && needsApproval(config.workflow.humanApproval, ctx.state);
+            if (shouldApprove && !isTerminal(ctx)) {
                 const decision = await requestApproval(ctx, agentRole!, lastOutput);
 
                 if (decision === 'abort') {
                     ctx = transition(ctx, { type: 'ABORT', payload: { reason: 'User aborted' } });
                 } else if (decision === 'retry') {
-                    // Stay in current state — loop will re-run same agent
                     logger.info('Retrying agent...');
                 }
-                // 'approve' continues normally
             }
         }
     } catch (err) {
@@ -124,8 +144,12 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         }
     }
 
-    // Print summary
+    // Final save
+    saveSession(projectRoot, ctx, tokenTracker.getEntries() as any[], sessionId);
+
+    // Print summaries
     printWorkflowSummary(ctx);
+    tokenTracker.printSummary();
 
     return ctx;
 }
@@ -158,7 +182,6 @@ function getLatestOutput(ctx: WorkflowContext): string | undefined {
 
 /**
  * Apply an agent's output to the workflow context via state transition.
- * Now integrates file parsing and test running.
  */
 function applyAgentOutput(
     ctx: WorkflowContext,
@@ -198,9 +221,8 @@ function applyAgentOutput(
 
             // Auto-run tests if configured
             if (config.workflow.autoRunTests) {
-                // Tests are run asynchronously — for now mark as needing async handling
-                // TODO: Make this properly async in the workflow loop
                 logger.info('Auto-running tests after tester agent...');
+                // TODO: Await runTests() and transition based on results
             }
 
             return ctx;

@@ -15,7 +15,8 @@ import { logger } from '../../utils/logger.js';
 export const runCommand = new Command('run')
     .description('Run an AI workflow task')
     .argument('<task>', 'Task description or path to spec file')
-    .action(async (task: string) => {
+    .option('--auto', 'Autonomous mode — skip all human approval gates')
+    .action(async (task: string, options: { auto?: boolean }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
@@ -24,7 +25,11 @@ export const runCommand = new Command('run')
         }
 
         try {
-            const result = await runWorkflow({ projectRoot, task });
+            const result = await runWorkflow({
+                projectRoot,
+                task,
+                auto: options.auto,
+            });
 
             if (result.state === 'failed') {
                 process.exit(1);
