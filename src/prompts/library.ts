@@ -1,8 +1,8 @@
 /**
  * Prompt library — manages agent prompt templates.
  *
- * When `ai-workflow init` runs, default prompt files are generated in
- * `.ai-workflow/prompts/`. Users can edit these to customize agent behavior.
+ * When `ai-agent-flow init` runs, default prompt files are generated in
+ * `.ai-agent-flow/prompts/`. Users can edit these to customize agent behavior.
  * Agents read their prompts from these files at runtime.
  *
  * Dependency direction: prompts.ts → utils/fs, core/errors, agents/types
@@ -183,7 +183,7 @@ export function getPoliciesDir(projectRoot: string): string {
 }
 
 /**
- * Generate default prompt and policy files in the project's .ai-workflow/ directory.
+ * Generate default prompt and policy files in the project's .ai-agent-flow/ directory.
  * Only creates files that don't already exist (preserves user edits).
  */
 export function generateDefaultPrompts(projectRoot: string): void {
@@ -209,7 +209,7 @@ export function generateDefaultPrompts(projectRoot: string): void {
         logger.debug(`Created policy: ${standardsPath}`);
     }
 
-    logger.success('Prompt templates generated in .ai-workflow/prompts/');
+    logger.success('Prompt templates generated in .ai-agent-flow/prompts/');
     logger.info('Edit these files to customize agent behavior.');
 }
 

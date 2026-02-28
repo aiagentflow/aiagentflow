@@ -87,7 +87,7 @@ export const workflowConfigSchema = z.object({
     /** Whether to auto-create a Git branch for each task. */
     autoCreateBranch: z.boolean().default(true),
     /** Branch name prefix for auto-created branches. */
-    branchPrefix: z.string().default('ai-workflow/'),
+    branchPrefix: z.string().default('ai-agent-flow/'),
     /** Whether to auto-run tests after code generation. */
     autoRunTests: z.boolean().default(true),
 });

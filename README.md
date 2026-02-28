@@ -1,4 +1,4 @@
-# ai-workflow
+# ai-agent-flow
 
 A local-first CLI tool that orchestrates multi-agent AI workflows for software development. Give it a task — it coordinates specialized agents (architect, coder, reviewer, tester, fixer) to implement, review, test, and ship code automatically.
 
@@ -10,7 +10,7 @@ A local-first CLI tool that orchestrates multi-agent AI workflows for software d
 
 Most AI coding tools are single-agent and have no structure. You prompt, you copy-paste, you hope for the best.
 
-`ai-workflow` is different — it runs a structured engineering loop:
+`ai-agent-flow` is different — it runs a structured engineering loop:
 
 ```
 Task → Architect → Coder → Reviewer → Tester → Fixer → PR
@@ -35,8 +35,8 @@ Each stage uses a specialized AI agent with tuned prompts and parameters. The lo
 
 ```bash
 # Clone the repo
-git clone https://github.com/raj-khan/ai-workflow.git
-cd ai-workflow
+git clone https://github.com/raj-khan/ai-agent-flow.git
+cd ai-agent-flow
 
 # Install dependencies
 pnpm install
@@ -46,10 +46,10 @@ pnpm build
 
 # Initialize in your project
 cd /path/to/your/project
-ai-workflow init
+ai-agent-flow init
 
 # Check setup
-ai-workflow doctor
+ai-agent-flow doctor
 ```
 
 The init wizard walks you through:
@@ -58,7 +58,7 @@ The init wizard walks you through:
 3. Assign models per agent role
 4. Set workflow preferences
 
-Configuration is saved locally in `.ai-workflow/config.json`.
+Configuration is saved locally in `.ai-agent-flow/config.json`.
 
 ---
 
@@ -66,10 +66,10 @@ Configuration is saved locally in `.ai-workflow/config.json`.
 
 | Command | Description |
 |---------|-------------|
-| `ai-workflow init` | Interactive setup wizard |
-| `ai-workflow config` | View current configuration |
-| `ai-workflow doctor` | Health check — verify providers and setup |
-| `ai-workflow run <task>` | Run a workflow task |
+| `ai-agent-flow init` | Interactive setup wizard |
+| `ai-agent-flow config` | View current configuration |
+| `ai-agent-flow doctor` | Health check — verify providers and setup |
+| `ai-agent-flow run <task>` | Run a workflow task |
 
 ---
 

@@ -11,7 +11,7 @@ import { parseFiles, writeFiles, parseAndWriteFiles } from '../../../src/core/wo
 let testDir: string;
 
 beforeEach(() => {
-    testDir = join(tmpdir(), `ai-workflow-fp-test-${Date.now()}`);
+    testDir = join(tmpdir(), `ai-agent-flow-fp-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
 });
 

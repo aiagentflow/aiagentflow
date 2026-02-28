@@ -26,7 +26,7 @@ const PROVIDER_FACTORIES: Record<LLMProviderName, (config: ProviderConfig) => LL
         const anthropicConfig = config.anthropic;
         if (!anthropicConfig) {
             throw new ProviderError(
-                'Anthropic provider is not configured. Run "ai-workflow init" to set up.',
+                'Anthropic provider is not configured. Run "ai-agent-flow init" to set up.',
                 { provider: 'anthropic' },
             );
         }

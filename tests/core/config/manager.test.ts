@@ -22,7 +22,7 @@ import { ConfigError } from '../../../src/core/errors.js';
 let testDir: string;
 
 beforeEach(() => {
-    testDir = join(tmpdir(), `ai-workflow-test-${Date.now()}`);
+    testDir = join(tmpdir(), `ai-agent-flow-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
 });
 

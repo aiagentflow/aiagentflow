@@ -2,7 +2,7 @@
  * QA policies — configurable quality acceptance rules.
  *
  * Defines rules that the judge agent uses to evaluate work quality.
- * Users can customize these via `.ai-workflow/policies/qa-rules.md`
+ * Users can customize these via `.ai-agent-flow/policies/qa-rules.md`
  * or through config options.
  *
  * Dependency direction: qa-policy.ts → config/types, utils

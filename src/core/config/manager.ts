@@ -37,7 +37,7 @@ export function configExists(projectRoot: string): boolean {
 /**
  * Load and validate the configuration from disk.
  *
- * @param projectRoot - The root directory of the project (where .ai-workflow/ lives)
+ * @param projectRoot - The root directory of the project (where .ai-agent-flow/ lives)
  * @returns The validated AppConfig
  * @throws {ConfigError} if the file doesn't exist, is invalid JSON, or fails validation
  */
@@ -46,7 +46,7 @@ export function loadConfig(projectRoot: string): AppConfig {
 
     if (!fileExists(configPath)) {
         throw new ConfigError(
-            `No configuration found. Run "ai-workflow init" first.`,
+            `No configuration found. Run "ai-agent-flow init" first.`,
             { configPath, projectRoot },
         );
     }

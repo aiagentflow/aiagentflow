@@ -1,10 +1,10 @@
 {
-  "name": "ai-workflow",
+  "name": "ai-agent-flow",
   "version": "0.1.0",
   "description": "A local-first, CLI-driven multi-agent AI software engineering workflow orchestrator",
   "type": "module",
   "bin": {
-    "ai-workflow": "./dist/cli/index.js"
+    "ai-agent-flow": "./dist/cli/index.js"
   },
   "files": [
     "dist",
@@ -13,9 +13,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/raj-khan/ai-workflow.git"
+    "url": "https://github.com/raj-khan/ai-agent-flow.git"
   },
-  "homepage": "https://github.com/raj-khan/ai-workflow#readme",
+  "homepage": "https://aiagentflow.dev",
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",

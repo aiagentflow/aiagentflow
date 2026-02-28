@@ -1,7 +1,7 @@
 /**
  * Session persistence — save and resume workflow state.
  *
- * Saves the workflow context to `.ai-workflow/sessions/` so workflows
+ * Saves the workflow context to `.ai-agent-flow/sessions/` so workflows
  * can survive crashes, restarts, and be resumed later.
  *
  * Dependency direction: session.ts → utils/fs, core/errors

@@ -23,7 +23,7 @@ Thumbs.db
 coverage/
 
 # Generated config (user-specific)
-.ai-workflow/
+.ai-agent-flow/
 
 # Logs
 *.log
