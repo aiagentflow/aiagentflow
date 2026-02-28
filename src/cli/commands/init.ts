@@ -17,7 +17,7 @@ import { join, basename, resolve } from 'node:path';
 import { configExists, saveConfig, getDefaultConfig, getConfigPath } from '../../core/config/manager.js';
 import { CONFIG_DIR_NAME } from '../../core/config/defaults.js';
 import type { AppConfig } from '../../core/config/types.js';
-import { ALL_AGENT_ROLES, AGENT_ROLE_LABELS } from '../../agents/types.js';
+import { ALL_AGENT_ROLES, AGENT_ROLE_LABELS, type AgentRole } from '../../agents/types.js';
 import type { LLMProviderName } from '../../providers/types.js';
 import { getSupportedProviders } from '../../providers/registry.js';
 import { generateDefaultPrompts } from '../../prompts/library.js';
@@ -182,72 +182,162 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     // ── Step 4: Agent Model Assignment ──
     logger.step(4, 6, 'Agent Model Assignment');
 
-    let defaultProvider: LLMProviderName;
+    const hasMixableProviders = selectedProviders.length > 1;
 
-    if (selectedProviders.length === 1) {
-        defaultProvider = selectedProviders[0]!;
-    } else {
-        const { preferredProvider } = await prompts({
+    // Helper to get default model for a provider
+    const getDefaultModel = (p: LLMProviderName) =>
+        p === 'anthropic' ? 'claude-sonnet-4-20250514' : 'llama3.2:latest';
+
+    const providerLabel = (p: LLMProviderName) =>
+        p === 'anthropic' ? 'Anthropic (Claude)' : 'Ollama (Local)';
+
+    if (hasMixableProviders) {
+        // Multiple providers — let user choose assignment strategy
+        console.log(chalk.gray('  You have multiple providers. You can assign them per agent role.'));
+        console.log(chalk.gray('  Tip: Use cloud APIs for reasoning (architect, reviewer, judge)'));
+        console.log(chalk.gray('  and local models for generation (coder, tester, fixer).'));
+        console.log();
+
+        const { assignmentMode } = await prompts({
             type: 'select',
-            name: 'preferredProvider',
-            message: 'Which provider should be the default for all agents?',
-            choices: selectedProviders.map((p) => ({
-                title: p === 'anthropic' ? 'Anthropic (Claude)' : 'Ollama (Local Models)',
-                value: p,
-            })),
+            name: 'assignmentMode',
+            message: 'How do you want to assign providers to agents?',
+            choices: [
+                { title: 'All agents use the same provider', value: 'single' },
+                { title: 'Smart split — cloud for reasoning, local for coding', value: 'smart' },
+                { title: 'Customize each agent individually', value: 'custom' },
+            ],
         });
 
-        if (!preferredProvider) return null;
-        defaultProvider = preferredProvider;
-    }
+        if (!assignmentMode) return null;
 
-    const defaultModel = defaultProvider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'llama3.2:latest';
+        if (assignmentMode === 'single') {
+            const { preferredProvider } = await prompts({
+                type: 'select',
+                name: 'preferredProvider',
+                message: 'Which provider for all agents?',
+                choices: selectedProviders.map((p) => ({
+                    title: providerLabel(p),
+                    value: p,
+                })),
+            });
 
-    console.log(chalk.gray(`  Default: ${defaultProvider} / ${defaultModel}`));
+            if (!preferredProvider) return null;
 
-    const { customizeAgents } = await prompts({
-        type: 'confirm',
-        name: 'customizeAgents',
-        message: 'Customize model per agent role? (No = use defaults for all)',
-        initial: false,
-    });
+            const model = getDefaultModel(preferredProvider);
+            for (const role of ALL_AGENT_ROLES) {
+                config.agents[role] = {
+                    ...config.agents[role],
+                    provider: preferredProvider,
+                    model,
+                };
+            }
+            console.log(chalk.gray(`  All agents → ${preferredProvider} / ${model}`));
 
-    if (customizeAgents) {
-        for (const role of ALL_AGENT_ROLES) {
-            const label = AGENT_ROLE_LABELS[role];
-            const roleAnswers = await prompts([
-                {
-                    type: 'select',
-                    name: 'provider',
-                    message: `${label} — provider:`,
-                    choices: selectedProviders.map((p) => ({ title: p, value: p })),
-                    initial: selectedProviders.indexOf(defaultProvider),
-                },
-                {
+        } else if (assignmentMode === 'smart') {
+            // Reasoning roles → cloud (anthropic), generation roles → local (ollama)
+            const cloudProvider = selectedProviders.includes('anthropic') ? 'anthropic' : selectedProviders[0]!;
+            const localProvider = selectedProviders.includes('ollama') ? 'ollama' : selectedProviders[0]!;
+
+            const reasoningRoles: AgentRole[] = ['architect', 'reviewer', 'judge'];
+            const generationRoles: AgentRole[] = ['coder', 'tester', 'fixer'];
+
+            for (const role of reasoningRoles) {
+                config.agents[role] = {
+                    ...config.agents[role],
+                    provider: cloudProvider,
+                    model: getDefaultModel(cloudProvider),
+                };
+            }
+            for (const role of generationRoles) {
+                config.agents[role] = {
+                    ...config.agents[role],
+                    provider: localProvider,
+                    model: getDefaultModel(localProvider),
+                };
+            }
+
+            console.log();
+            console.log(chalk.bold('  Assignment:'));
+            for (const role of ALL_AGENT_ROLES) {
+                const p = config.agents[role].provider;
+                console.log(chalk.gray(`    ${AGENT_ROLE_LABELS[role]} → ${p} / ${config.agents[role].model}`));
+            }
+
+        } else {
+            // Custom: ask per role
+            for (const role of ALL_AGENT_ROLES) {
+                const label = AGENT_ROLE_LABELS[role];
+                const roleAnswers = await prompts([
+                    {
+                        type: 'select',
+                        name: 'provider',
+                        message: `${label} — provider:`,
+                        choices: selectedProviders.map((p) => ({ title: providerLabel(p), value: p })),
+                    },
+                    {
+                        type: 'text',
+                        name: 'model',
+                        message: `${label} — model:`,
+                        initial: (_prev: unknown, answers: { provider?: string }) =>
+                            getDefaultModel((answers.provider ?? selectedProviders[0]!) as LLMProviderName),
+                    },
+                ]);
+
+                if (!roleAnswers.provider) return null;
+
+                config.agents[role] = {
+                    ...config.agents[role],
+                    provider: roleAnswers.provider,
+                    model: roleAnswers.model,
+                };
+            }
+        }
+    } else {
+        // Single provider — simpler flow
+        const defaultProvider = selectedProviders[0]!;
+        const defaultModel = getDefaultModel(defaultProvider);
+
+        console.log(chalk.gray(`  Provider: ${providerLabel(defaultProvider)}`));
+
+        const { customizeModel } = await prompts({
+            type: 'confirm',
+            name: 'customizeModel',
+            message: 'Use the same model for all agents? (No = customize per role)',
+            initial: true,
+        });
+
+        if (customizeModel) {
+            const { model } = await prompts({
+                type: 'text',
+                name: 'model',
+                message: 'Model to use for all agents:',
+                initial: defaultModel,
+            });
+
+            for (const role of ALL_AGENT_ROLES) {
+                config.agents[role] = {
+                    ...config.agents[role],
+                    provider: defaultProvider,
+                    model: model || defaultModel,
+                };
+            }
+        } else {
+            for (const role of ALL_AGENT_ROLES) {
+                const label = AGENT_ROLE_LABELS[role];
+                const { model } = await prompts({
                     type: 'text',
                     name: 'model',
                     message: `${label} — model:`,
-                    initial: (prev: string) =>
-                        prev === 'anthropic' ? 'claude-sonnet-4-20250514' : 'llama3.2:latest',
-                },
-            ]);
+                    initial: defaultModel,
+                });
 
-            if (!roleAnswers.provider) return null;
-
-            config.agents[role] = {
-                ...config.agents[role],
-                provider: roleAnswers.provider,
-                model: roleAnswers.model,
-            };
-        }
-    } else {
-        // Apply defaults to all agents
-        for (const role of ALL_AGENT_ROLES) {
-            config.agents[role] = {
-                ...config.agents[role],
-                provider: defaultProvider,
-                model: defaultModel,
-            };
+                config.agents[role] = {
+                    ...config.agents[role],
+                    provider: defaultProvider,
+                    model: model || defaultModel,
+                };
+            }
         }
     }
 
