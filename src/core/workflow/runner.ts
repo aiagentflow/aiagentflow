@@ -28,6 +28,7 @@ import { runTests } from './test-runner.js';
 import { requestApproval, needsApproval } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
 import { saveSession } from './session.js';
+import { loadQAPolicy, evaluateReview, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
 import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
@@ -52,6 +53,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     const { projectRoot, task, auto = false } = options;
     const config = loadConfig(projectRoot);
     const tokenTracker = new TokenTracker();
+    const qaPolicy = loadQAPolicy(projectRoot);
 
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
@@ -97,7 +99,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             try {
                 const output = await agent.execute({
                     task: ctx.task,
-                    context: buildAgentContext(ctx),
+                    context: buildAgentContext(ctx, qaPolicy),
                     previousOutput: getLatestOutput(ctx),
                 });
 
@@ -112,7 +114,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
                 });
 
                 // Transition based on agent output
-                ctx = applyAgentOutput(ctx, agentRole, output.content, config, projectRoot);
+                ctx = applyAgentOutput(ctx, agentRole, output.content, config, projectRoot, qaPolicy);
             } catch (err) {
                 spinner.fail(`${agentRole} failed`);
 
@@ -157,7 +159,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 // ── Private helpers ──
 
 /** Build context string for the current agent based on workflow state. */
-function buildAgentContext(ctx: WorkflowContext): string {
+function buildAgentContext(ctx: WorkflowContext, qaPolicy?: QAPolicy): string {
     const parts: string[] = [];
 
     if (ctx.spec) parts.push(`## Spec\n${ctx.spec}`);
@@ -166,6 +168,11 @@ function buildAgentContext(ctx: WorkflowContext): string {
     if (ctx.testFailures) parts.push(`## Test Failures\n${ctx.testFailures}`);
     if (ctx.generatedFiles.length > 0) {
         parts.push(`## Modified Files\n${ctx.generatedFiles.join('\n')}`);
+    }
+
+    // Include QA policy for the judge agent
+    if (qaPolicy && ctx.state === 'tests_passed') {
+        parts.push(formatPolicyForAgent(qaPolicy));
     }
 
     return parts.join('\n\n');
@@ -189,6 +196,7 @@ function applyAgentOutput(
     content: string,
     config: AppConfig,
     projectRoot: string,
+    qaPolicy: QAPolicy,
 ): WorkflowContext {
     switch (role) {
         case 'architect':
@@ -207,8 +215,17 @@ function applyAgentOutput(
         }
 
         case 'reviewer': {
-            const approved = content.toUpperCase().includes('APPROVE') &&
+            const reviewApproved = content.toUpperCase().includes('APPROVE') &&
                 !content.toUpperCase().includes('REQUEST_CHANGES');
+
+            // Evaluate review against QA policy
+            const evaluation = evaluateReview(content, qaPolicy);
+            if (!evaluation.passed) {
+                logger.warn(`QA policy check: ${evaluation.criticalCount} critical, ${evaluation.warningCount} warnings`);
+            }
+
+            // Review passes only if both the reviewer approves AND QA policy passes
+            const approved = reviewApproved && evaluation.passed;
             return transition(ctx, { type: 'REVIEW_DONE', payload: { approved, feedback: content } });
         }
 
