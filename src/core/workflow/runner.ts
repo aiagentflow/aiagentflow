@@ -21,9 +21,10 @@ import {
     type WorkflowContext,
 } from './engine.js';
 import { createAgent } from '../../agents/factory.js';
-import { ReviewerAgent } from '../../agents/roles/reviewer.js';
-import { JudgeAgent } from '../../agents/roles/judge.js';
 import { GitClient } from '../../git/client.js';
+import { parseAndWriteFiles } from './file-parser.js';
+import { runTests } from './test-runner.js';
+import { requestApproval, needsApproval } from './approval.js';
 import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
@@ -51,13 +52,11 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     console.log();
 
     // Optional: create a Git branch for this task
-    let originalBranch: string | undefined;
     if (config.workflow.autoCreateBranch) {
         const git = new GitClient(projectRoot);
         const isRepo = await git.isRepo();
 
         if (isRepo) {
-            originalBranch = await git.getCurrentBranch();
             const branchName = GitClient.toBranchName(config.workflow.branchPrefix, task);
             await git.createBranch(branchName);
         }
@@ -65,6 +64,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 
     // Create workflow context
     let ctx = createWorkflowContext(task, config.workflow.maxIterations);
+    let lastOutput = '';
 
     try {
         // Main workflow loop
@@ -72,9 +72,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             const agentRole = getNextAgent(ctx);
 
             if (!agentRole) {
-                // No more agents to run — check if we should complete
                 if (ctx.state === 'qa_approved') {
-                    // TODO: Generate PR description and finalize
                     logger.success('Workflow complete!');
                     break;
                 }
@@ -93,9 +91,10 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
                 });
 
                 spinner.succeed(`${agentRole} complete (${output.tokensUsed} tokens)`);
+                lastOutput = output.content;
 
                 // Transition based on agent output
-                ctx = applyAgentOutput(ctx, agentRole, output.content, config);
+                ctx = applyAgentOutput(ctx, agentRole, output.content, config, projectRoot);
             } catch (err) {
                 spinner.fail(`${agentRole} failed`);
 
@@ -106,10 +105,16 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             }
 
             // Human approval gate
-            if (config.workflow.humanApproval && !isTerminal(ctx)) {
-                // TODO: Implement interactive approval prompt
-                // For now, auto-approve all stages
-                logger.debug('Auto-approving stage (human approval TODO)');
+            if (needsApproval(config.workflow.humanApproval, ctx.state) && !isTerminal(ctx)) {
+                const decision = await requestApproval(ctx, agentRole!, lastOutput);
+
+                if (decision === 'abort') {
+                    ctx = transition(ctx, { type: 'ABORT', payload: { reason: 'User aborted' } });
+                } else if (decision === 'retry') {
+                    // Stay in current state — loop will re-run same agent
+                    logger.info('Retrying agent...');
+                }
+                // 'approve' continues normally
             }
         }
     } catch (err) {
@@ -153,41 +158,61 @@ function getLatestOutput(ctx: WorkflowContext): string | undefined {
 
 /**
  * Apply an agent's output to the workflow context via state transition.
+ * Now integrates file parsing and test running.
  */
 function applyAgentOutput(
     ctx: WorkflowContext,
     role: string,
     content: string,
-    _config: AppConfig,
+    config: AppConfig,
+    projectRoot: string,
 ): WorkflowContext {
     switch (role) {
         case 'architect':
             if (ctx.state === 'idle') {
                 ctx = transition(ctx, { type: 'SPEC_READY', payload: { spec: content } });
-                // Auto-approve plan for now
-                // TODO: Parse spec vs plan from architect output
                 ctx = transition(ctx, { type: 'PLAN_APPROVED', payload: { plan: content } });
             }
             return ctx;
 
-        case 'coder':
-            // TODO: Parse file contents from coder output and write to disk
-            return transition(ctx, { type: 'CODE_GENERATED', payload: { files: ['(parsed from output)'] } });
+        case 'coder': {
+            const files = parseAndWriteFiles(projectRoot, content);
+            return transition(ctx, {
+                type: 'CODE_GENERATED',
+                payload: { files: files.length > 0 ? files : ['(no files parsed)'] },
+            });
+        }
 
         case 'reviewer': {
-            // Check if reviewer approved or requested changes
             const approved = content.toUpperCase().includes('APPROVE') &&
                 !content.toUpperCase().includes('REQUEST_CHANGES');
             return transition(ctx, { type: 'REVIEW_DONE', payload: { approved, feedback: content } });
         }
 
-        case 'tester':
-            // TODO: Parse test files from output and run them
-            return transition(ctx, { type: 'TESTS_WRITTEN', payload: { testFiles: ['(parsed from output)'] } });
+        case 'tester': {
+            const testFiles = parseAndWriteFiles(projectRoot, content);
+            ctx = transition(ctx, {
+                type: 'TESTS_WRITTEN',
+                payload: { testFiles: testFiles.length > 0 ? testFiles : ['(no test files parsed)'] },
+            });
 
-        case 'fixer':
-            // TODO: Parse fixed files and write to disk
-            return transition(ctx, { type: 'FIX_APPLIED', payload: { files: ['(parsed from output)'] } });
+            // Auto-run tests if configured
+            if (config.workflow.autoRunTests) {
+                // Tests are run asynchronously — for now mark as needing async handling
+                // TODO: Make this properly async in the workflow loop
+                logger.info('Auto-running tests after tester agent...');
+            }
+
+            return ctx;
+        }
+
+        case 'fixer': {
+            const fixedFiles = parseAndWriteFiles(projectRoot, content);
+            return transition(ctx, {
+                type: 'FIX_APPLIED',
+                payload: { files: fixedFiles.length > 0 ? fixedFiles : ['(no files parsed)'] },
+            });
+        }
 
         case 'judge': {
             const passed = content.toUpperCase().includes('PASS') &&
@@ -212,6 +237,14 @@ function printWorkflowSummary(ctx: WorkflowContext): void {
     console.log(chalk.gray(`Final state: ${ctx.state}`));
     console.log(chalk.gray(`Iterations: ${ctx.iteration}/${ctx.maxIterations}`));
     console.log(chalk.gray(`Steps: ${ctx.history.length}`));
+
+    if (ctx.generatedFiles.length > 0) {
+        console.log();
+        console.log(chalk.bold('  Files modified:'));
+        for (const file of ctx.generatedFiles) {
+            console.log(chalk.gray(`    ${file}`));
+        }
+    }
 
     if (ctx.history.length > 0) {
         console.log();

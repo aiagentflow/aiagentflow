@@ -1,0 +1,114 @@
+/**
+ * File parser — extracts code blocks from agent output and writes to disk.
+ *
+ * Agents output code in a structured format:
+ *   FILE: path/to/file.ts
+ *   ```
+ *   <code content>
+ *   ```
+ *
+ * This module parses that format and writes files to the project directory.
+ *
+ * Dependency direction: file-parser.ts → utils/fs, core/errors
+ * Used by: workflow runner
+ */
+
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { logger } from '../../utils/logger.js';
+
+/** A parsed file extracted from agent output. */
+export interface ParsedFile {
+    /** Relative path from project root. */
+    path: string;
+    /** File contents. */
+    content: string;
+}
+
+/**
+ * Parse agent output to extract file blocks.
+ *
+ * Supports two formats:
+ * 1. FILE: path/to/file.ts followed by a fenced code block
+ * 2. ```language:path/to/file.ts (language annotation with path)
+ */
+export function parseFiles(output: string): ParsedFile[] {
+    const files: ParsedFile[] = [];
+
+    // Pattern 1: FILE: path\n```\ncontent\n```
+    const fileBlockPattern = /FILE:\s*(.+?)\n```[\w]*\n([\s\S]*?)```/g;
+    let match: RegExpExecArray | null;
+
+    match = fileBlockPattern.exec(output);
+    while (match !== null) {
+        const path = match[1]?.trim();
+        const content = match[2];
+        if (path && content) {
+            files.push({ path, content });
+        }
+        match = fileBlockPattern.exec(output);
+    }
+
+    // Pattern 2: ```language:path/to/file.ts\ncontent\n```
+    if (files.length === 0) {
+        const annotatedPattern = /```\w+:(.+?)\n([\s\S]*?)```/g;
+        match = annotatedPattern.exec(output);
+        while (match !== null) {
+            const path = match[1]?.trim();
+            const content = match[2];
+            if (path && content) {
+                files.push({ path, content });
+            }
+            match = annotatedPattern.exec(output);
+        }
+    }
+
+    return files;
+}
+
+/**
+ * Write parsed files to disk under the project root.
+ *
+ * Creates parent directories as needed. Returns the list of written file paths.
+ */
+export function writeFiles(projectRoot: string, files: ParsedFile[]): string[] {
+    const writtenPaths: string[] = [];
+
+    for (const file of files) {
+        // Prevent path traversal
+        if (file.path.includes('..')) {
+            logger.warn(`Skipping file with path traversal: ${file.path}`);
+            continue;
+        }
+
+        const absolutePath = join(projectRoot, file.path);
+        const dir = dirname(absolutePath);
+
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(absolutePath, file.content, 'utf-8');
+
+        writtenPaths.push(file.path);
+        logger.debug(`Wrote: ${file.path}`);
+    }
+
+    if (writtenPaths.length > 0) {
+        logger.info(`Wrote ${writtenPaths.length} file(s)`);
+    }
+
+    return writtenPaths;
+}
+
+/**
+ * Parse agent output and write extracted files to disk.
+ * Combines parseFiles + writeFiles in one call.
+ */
+export function parseAndWriteFiles(projectRoot: string, output: string): string[] {
+    const files = parseFiles(output);
+
+    if (files.length === 0) {
+        logger.debug('No file blocks found in agent output');
+        return [];
+    }
+
+    return writeFiles(projectRoot, files);
+}
