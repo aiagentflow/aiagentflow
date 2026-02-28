@@ -19,6 +19,12 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Secrets / credentials
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Test coverage
 coverage/
 
