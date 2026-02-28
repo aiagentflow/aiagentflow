@@ -4,7 +4,7 @@ A local-first CLI that orchestrates multi-agent AI workflows for software develo
 
 **No cloud dependency. Bring your own API keys. Your code stays on your machine.**
 
-[![npm version](https://img.shields.io/npm/v/aiagentflow)](https://www.npmjs.com/package/aiagentflow)
+[![npm version](https://img.shields.io/npm/v/@aiagentflow/cli)](https://www.npmjs.com/package/@aiagentflow/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
 
@@ -23,13 +23,13 @@ Each stage uses a specialized AI agent with tuned prompts and parameters. The lo
 ## Install
 
 ```bash
-npm install -g aiagentflow
+npm install -g @aiagentflow/cli
 ```
 
 Or with pnpm:
 
 ```bash
-pnpm add -g aiagentflow
+pnpm add -g @aiagentflow/cli
 ```
 
 ---
