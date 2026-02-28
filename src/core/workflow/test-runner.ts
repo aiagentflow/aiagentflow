@@ -12,12 +12,12 @@ import { execa } from 'execa';
 import { logger } from '../../utils/logger.js';
 
 export interface TestResult {
-    /** Whether all tests passed. */
-    passed: boolean;
-    /** Stdout + stderr from the test command. */
-    output: string;
-    /** Exit code of the test command. */
-    exitCode: number;
+  /** Whether all tests passed. */
+  passed: boolean;
+  /** Stdout + stderr from the test command. */
+  output: string;
+  /** Exit code of the test command. */
+  exitCode: number;
 }
 
 /**
@@ -27,41 +27,41 @@ export interface TestResult {
  * @param testCommand - The test command to run (default: 'pnpm test')
  */
 export async function runTests(
-    projectRoot: string,
-    testCommand: string = 'pnpm test',
+  projectRoot: string,
+  testCommand: string = 'pnpm test',
 ): Promise<TestResult> {
-    const parts = testCommand.split(' ');
-    const cmd = parts[0] ?? 'pnpm';
-    const args = parts.slice(1);
+  const parts = testCommand.split(' ');
+  const cmd = parts[0] ?? 'pnpm';
+  const args = parts.slice(1);
 
-    logger.info(`Running tests: ${testCommand}`);
+  logger.info(`Running tests: ${testCommand}`);
 
-    try {
-        const result = await execa(cmd, args, {
-            cwd: projectRoot,
-            reject: false, // Don't throw on non-zero exit
-            timeout: 120_000, // 2 minute timeout
-            env: { ...process.env, FORCE_COLOR: '0' }, // Disable color for cleaner output
-        });
+  try {
+    const result = await execa(cmd, args, {
+      cwd: projectRoot,
+      reject: false, // Don't throw on non-zero exit
+      timeout: 120_000, // 2 minute timeout
+      env: { ...process.env, FORCE_COLOR: '0' }, // Disable color for cleaner output
+    });
 
-        const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
-        const passed = result.exitCode === 0;
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
+    const passed = result.exitCode === 0;
 
-        if (passed) {
-            logger.success('Tests passed');
-        } else {
-            logger.warn(`Tests failed (exit code: ${result.exitCode})`);
-        }
-
-        return { passed, output, exitCode: result.exitCode ?? 1 };
-    } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.error(`Failed to run tests: ${message}`);
-
-        return {
-            passed: false,
-            output: message,
-            exitCode: 1,
-        };
+    if (passed) {
+      logger.success('Tests passed');
+    } else {
+      logger.warn(`Tests failed (exit code: ${result.exitCode})`);
     }
+
+    return { passed, output, exitCode: result.exitCode ?? 1 };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to run tests: ${message}`);
+
+    return {
+      passed: false,
+      output: message,
+      exitCode: 1,
+    };
+  }
 }

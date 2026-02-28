@@ -25,7 +25,7 @@ const CONTEXT_DIR = 'context';
 // ── Default Prompts ──
 
 const DEFAULT_PROMPTS: Record<AgentRole, string> = {
-    architect: `# Architect Agent
+  architect: `# Architect Agent
 
 You are a senior software architect. Your job is to analyze a task and create a clear implementation plan.
 
@@ -44,7 +44,7 @@ You are a senior software architect. Your job is to analyze a task and create a 
 Be specific. No vague instructions. Every step should be directly actionable by a developer.
 `,
 
-    coder: `# Coder Agent
+  coder: `# Coder Agent
 
 You are a senior software developer. You implement features based on a plan provided by the architect.
 
@@ -75,7 +75,7 @@ The word FILE: followed by the file path MUST appear on its own line BEFORE each
 Write complete, working code. No placeholders, no TODOs, no "implement this later".
 `,
 
-    reviewer: `# Reviewer Agent
+  reviewer: `# Reviewer Agent
 
 You are a senior code reviewer. You review code changes for quality, correctness, and maintainability.
 
@@ -96,7 +96,7 @@ You are a senior code reviewer. You review code changes for quality, correctness
 Be constructive. Explain WHY something is a problem, not just WHAT.
 `,
 
-    tester: `# Tester Agent
+  tester: `# Tester Agent
 
 You are a QA engineer who writes comprehensive tests.
 
@@ -119,7 +119,7 @@ import { describe, it, expect } from 'vitest';
 The word FILE: followed by the file path MUST appear on its own line BEFORE each code block.
 `,
 
-    fixer: `# Fixer Agent
+  fixer: `# Fixer Agent
 
 You are a debugging expert. You fix code issues identified by reviewers and test failures.
 
@@ -142,7 +142,7 @@ FILE: src/example.ts
 3. **Verification** — how to confirm the fix works
 `,
 
-    judge: `# Judge Agent
+  judge: `# Judge Agent
 
 You are a QA lead who decides if a task is complete and meets quality standards.
 
@@ -192,14 +192,14 @@ These rules are injected into every agent's context. Edit them to match your pro
  * Get the prompts directory path.
  */
 export function getPromptsDir(projectRoot: string): string {
-    return join(projectRoot, CONFIG_DIR_NAME, PROMPTS_DIR);
+  return join(projectRoot, CONFIG_DIR_NAME, PROMPTS_DIR);
 }
 
 /**
  * Get the policies directory path.
  */
 export function getPoliciesDir(projectRoot: string): string {
-    return join(projectRoot, CONFIG_DIR_NAME, POLICIES_DIR);
+  return join(projectRoot, CONFIG_DIR_NAME, POLICIES_DIR);
 }
 
 /**
@@ -207,32 +207,32 @@ export function getPoliciesDir(projectRoot: string): string {
  * Only creates files that don't already exist (preserves user edits).
  */
 export function generateDefaultPrompts(projectRoot: string): void {
-    const promptsDir = getPromptsDir(projectRoot);
-    const policiesDir = getPoliciesDir(projectRoot);
-    const contextDir = join(projectRoot, CONFIG_DIR_NAME, CONTEXT_DIR);
+  const promptsDir = getPromptsDir(projectRoot);
+  const policiesDir = getPoliciesDir(projectRoot);
+  const contextDir = join(projectRoot, CONFIG_DIR_NAME, CONTEXT_DIR);
 
-    ensureDir(promptsDir);
-    ensureDir(policiesDir);
-    ensureDir(contextDir);
+  ensureDir(promptsDir);
+  ensureDir(policiesDir);
+  ensureDir(contextDir);
 
-    // Generate agent prompt files
-    for (const role of ALL_AGENT_ROLES) {
-        const filePath = join(promptsDir, `${role}.md`);
-        if (!existsSync(filePath)) {
-            writeFileSync(filePath, DEFAULT_PROMPTS[role], 'utf-8');
-            logger.debug(`Created prompt: ${filePath}`);
-        }
+  // Generate agent prompt files
+  for (const role of ALL_AGENT_ROLES) {
+    const filePath = join(promptsDir, `${role}.md`);
+    if (!existsSync(filePath)) {
+      writeFileSync(filePath, DEFAULT_PROMPTS[role], 'utf-8');
+      logger.debug(`Created prompt: ${filePath}`);
     }
+  }
 
-    // Generate coding standards
-    const standardsPath = join(policiesDir, 'coding-standards.md');
-    if (!existsSync(standardsPath)) {
-        writeFileSync(standardsPath, DEFAULT_CODING_STANDARDS, 'utf-8');
-        logger.debug(`Created policy: ${standardsPath}`);
-    }
+  // Generate coding standards
+  const standardsPath = join(policiesDir, 'coding-standards.md');
+  if (!existsSync(standardsPath)) {
+    writeFileSync(standardsPath, DEFAULT_CODING_STANDARDS, 'utf-8');
+    logger.debug(`Created policy: ${standardsPath}`);
+  }
 
-    logger.success('Prompt templates generated in .aiagentflow/prompts/');
-    logger.info('Edit these files to customize agent behavior.');
+  logger.success('Prompt templates generated in .aiagentflow/prompts/');
+  logger.info('Edit these files to customize agent behavior.');
 }
 
 /**
@@ -240,14 +240,14 @@ export function generateDefaultPrompts(projectRoot: string): void {
  * Falls back to the built-in default if the file doesn't exist.
  */
 export function loadAgentPrompt(projectRoot: string, role: AgentRole): string {
-    const filePath = join(getPromptsDir(projectRoot), `${role}.md`);
+  const filePath = join(getPromptsDir(projectRoot), `${role}.md`);
 
-    if (existsSync(filePath)) {
-        return readTextFile(filePath);
-    }
+  if (existsSync(filePath)) {
+    return readTextFile(filePath);
+  }
 
-    // Fall back to built-in default
-    return DEFAULT_PROMPTS[role];
+  // Fall back to built-in default
+  return DEFAULT_PROMPTS[role];
 }
 
 /**
@@ -255,11 +255,11 @@ export function loadAgentPrompt(projectRoot: string, role: AgentRole): string {
  * Returns empty string if no policy file exists.
  */
 export function loadCodingStandards(projectRoot: string): string {
-    const filePath = join(getPoliciesDir(projectRoot), 'coding-standards.md');
+  const filePath = join(getPoliciesDir(projectRoot), 'coding-standards.md');
 
-    if (existsSync(filePath)) {
-        return readTextFile(filePath);
-    }
+  if (existsSync(filePath)) {
+    return readTextFile(filePath);
+  }
 
-    return '';
+  return '';
 }

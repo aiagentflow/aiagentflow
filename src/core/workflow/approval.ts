@@ -21,48 +21,47 @@ export type ApprovalDecision = 'approve' | 'edit' | 'retry' | 'abort';
  * Shows a summary of what happened and gives options to proceed.
  */
 export async function requestApproval(
-    ctx: WorkflowContext,
-    agentRole: string,
-    output: string,
+  ctx: WorkflowContext,
+  agentRole: string,
+  output: string,
 ): Promise<ApprovalDecision> {
-    console.log();
-    console.log(chalk.bold.cyan(`── ${agentRole.toUpperCase()} Output ──`));
-    console.log();
+  console.log();
+  console.log(chalk.bold.cyan(`── ${agentRole.toUpperCase()} Output ──`));
+  console.log();
 
-    // Show a truncated preview of the output
-    const preview = output.length > 500
-        ? output.slice(0, 500) + chalk.gray('\n... (truncated)')
-        : output;
-    console.log(preview);
+  // Show a truncated preview of the output
+  const preview =
+    output.length > 500 ? output.slice(0, 500) + chalk.gray('\n... (truncated)') : output;
+  console.log(preview);
 
-    console.log();
-    console.log(chalk.gray(`State: ${ctx.state} | Iteration: ${ctx.iteration}/${ctx.maxIterations}`));
-    console.log();
+  console.log();
+  console.log(chalk.gray(`State: ${ctx.state} | Iteration: ${ctx.iteration}/${ctx.maxIterations}`));
+  console.log();
 
-    const { decision } = await prompts({
-        type: 'select',
-        name: 'decision',
-        message: 'How would you like to proceed?',
-        choices: [
-            { title: chalk.green('✔ Approve') + ' — continue to next stage', value: 'approve' },
-            { title: chalk.yellow('↻ Retry') + ' — re-run this agent', value: 'retry' },
-            { title: chalk.red('✘ Abort') + ' — stop the workflow', value: 'abort' },
-        ],
-        initial: 0,
-    });
+  const { decision } = await prompts({
+    type: 'select',
+    name: 'decision',
+    message: 'How would you like to proceed?',
+    choices: [
+      { title: chalk.green('✔ Approve') + ' — continue to next stage', value: 'approve' },
+      { title: chalk.yellow('↻ Retry') + ' — re-run this agent', value: 'retry' },
+      { title: chalk.red('✘ Abort') + ' — stop the workflow', value: 'abort' },
+    ],
+    initial: 0,
+  });
 
-    if (!decision) return 'abort';
+  if (!decision) return 'abort';
 
-    return decision as ApprovalDecision;
+  return decision as ApprovalDecision;
 }
 
 /**
  * Check if approval is needed based on config and current state.
  */
 export function needsApproval(humanApproval: boolean, state: string): boolean {
-    if (!humanApproval) return false;
+  if (!humanApproval) return false;
 
-    // Skip approval for terminal states
-    const skipStates = ['complete', 'failed', 'idle'];
-    return !skipStates.includes(state);
+  // Skip approval for terminal states
+  const skipStates = ['complete', 'failed', 'idle'];
+  return !skipStates.includes(state);
 }

@@ -27,34 +27,30 @@ import { WorkflowError } from '../core/errors.js';
  * @param config - Full application config
  * @param projectRoot - Project root directory for prompt loading
  */
-export function createAgent(
-    role: AgentRole,
-    config: AppConfig,
-    projectRoot: string,
-): BaseAgent {
-    const agentConfig = config.agents[role];
-    const provider = createProvider(agentConfig.provider, config.providers);
+export function createAgent(role: AgentRole, config: AppConfig, projectRoot: string): BaseAgent {
+  const agentConfig = config.agents[role];
+  const provider = createProvider(agentConfig.provider, config.providers);
 
-    const options = {
-        model: agentConfig.model,
-        temperature: agentConfig.temperature,
-        maxTokens: agentConfig.maxTokens,
-    };
+  const options = {
+    model: agentConfig.model,
+    temperature: agentConfig.temperature,
+    maxTokens: agentConfig.maxTokens,
+  };
 
-    switch (role) {
-        case 'architect':
-            return new ArchitectAgent(provider, options, projectRoot);
-        case 'coder':
-            return new CoderAgent(provider, options, projectRoot);
-        case 'reviewer':
-            return new ReviewerAgent(provider, options, projectRoot);
-        case 'tester':
-            return new TesterAgent(provider, options, projectRoot);
-        case 'fixer':
-            return new FixerAgent(provider, options, projectRoot);
-        case 'judge':
-            return new JudgeAgent(provider, options, projectRoot);
-        default:
-            throw new WorkflowError(`Unknown agent role: ${role}`, { role });
-    }
+  switch (role) {
+    case 'architect':
+      return new ArchitectAgent(provider, options, projectRoot);
+    case 'coder':
+      return new CoderAgent(provider, options, projectRoot);
+    case 'reviewer':
+      return new ReviewerAgent(provider, options, projectRoot);
+    case 'tester':
+      return new TesterAgent(provider, options, projectRoot);
+    case 'fixer':
+      return new FixerAgent(provider, options, projectRoot);
+    case 'judge':
+      return new JudgeAgent(provider, options, projectRoot);
+    default:
+      throw new WorkflowError(`Unknown agent role: ${role}`, { role });
+  }
 }

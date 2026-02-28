@@ -17,9 +17,9 @@ import { planCommand } from './commands/plan.js';
 const program = new Command();
 
 program
-    .name('aiagentflow')
-    .description('AI Engineering Workflow Orchestrator — multi-agent development automation')
-    .version('0.1.0');
+  .name('aiagentflow')
+  .description('AI Engineering Workflow Orchestrator — multi-agent development automation')
+  .version('0.1.0');
 
 // Register commands
 program.addCommand(initCommand);

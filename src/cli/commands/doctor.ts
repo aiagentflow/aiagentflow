@@ -16,58 +16,58 @@ import { validateAllProviders } from '../../providers/registry.js';
 import { logger } from '../../utils/logger.js';
 
 export const doctorCommand = new Command('doctor')
-    .description('Check project setup and provider health')
-    .action(async () => {
-        const projectRoot = process.cwd();
+  .description('Check project setup and provider health')
+  .action(async () => {
+    const projectRoot = process.cwd();
 
-        logger.header('AI Workflow — Health Check');
+    logger.header('AI Workflow — Health Check');
 
-        // Check config exists
-        const configCheck = configExists(projectRoot);
-        console.log(
-            configCheck
-                ? chalk.green('  ✔ Configuration file found')
-                : chalk.red('  ✘ No configuration file — run "aiagentflow init"'),
-        );
+    // Check config exists
+    const configCheck = configExists(projectRoot);
+    console.log(
+      configCheck
+        ? chalk.green('  ✔ Configuration file found')
+        : chalk.red('  ✘ No configuration file — run "aiagentflow init"'),
+    );
 
-        if (!configCheck) {
-            process.exit(1);
-        }
+    if (!configCheck) {
+      process.exit(1);
+    }
 
-        // Load config
-        const config = loadConfig(projectRoot);
-        console.log(chalk.green('  ✔ Configuration is valid'));
+    // Load config
+    const config = loadConfig(projectRoot);
+    console.log(chalk.green('  ✔ Configuration is valid'));
 
-        // Check providers
-        console.log();
-        logger.info('Checking provider connections...');
+    // Check providers
+    console.log();
+    logger.info('Checking provider connections...');
 
-        const spinner = ora('Testing providers...').start();
-        const results = await validateAllProviders(config.providers);
-        spinner.stop();
+    const spinner = ora('Testing providers...').start();
+    const results = await validateAllProviders(config.providers);
+    spinner.stop();
 
-        let allHealthy = true;
-        for (const [name, healthy] of Object.entries(results)) {
-            if (healthy) {
-                console.log(chalk.green(`  ✔ ${name} — connected`));
-            } else {
-                const isConfigured =
-                    name === 'anthropic' ? !!config.providers.anthropic : !!config.providers.ollama;
+    let allHealthy = true;
+    for (const [name, healthy] of Object.entries(results)) {
+      if (healthy) {
+        console.log(chalk.green(`  ✔ ${name} — connected`));
+      } else {
+        const isConfigured =
+          name === 'anthropic' ? !!config.providers.anthropic : !!config.providers.ollama;
 
-                if (isConfigured) {
-                    console.log(chalk.red(`  ✘ ${name} — connection failed`));
-                    allHealthy = false;
-                } else {
-                    console.log(chalk.gray(`  - ${name} — not configured (skipped)`));
-                }
-            }
-        }
-
-        // Summary
-        console.log();
-        if (allHealthy) {
-            logger.success('All checks passed! You\'re ready to go.');
+        if (isConfigured) {
+          console.log(chalk.red(`  ✘ ${name} — connection failed`));
+          allHealthy = false;
         } else {
-            logger.warn('Some checks failed. Review the output above.');
+          console.log(chalk.gray(`  - ${name} — not configured (skipped)`));
         }
-    });
+      }
+    }
+
+    // Summary
+    console.log();
+    if (allHealthy) {
+      logger.success("All checks passed! You're ready to go.");
+    } else {
+      logger.warn('Some checks failed. Review the output above.');
+    }
+  });

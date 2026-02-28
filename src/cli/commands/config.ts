@@ -11,25 +11,25 @@ import { configExists, loadConfig, getConfigPath } from '../../core/config/manag
 import { logger } from '../../utils/logger.js';
 
 export const configCommand = new Command('config')
-    .description('View or manage configuration')
-    .option('-p, --path', 'Show config file path only')
-    .action((options: { path?: boolean }) => {
-        const projectRoot = process.cwd();
+  .description('View or manage configuration')
+  .option('-p, --path', 'Show config file path only')
+  .action((options: { path?: boolean }) => {
+    const projectRoot = process.cwd();
 
-        if (!configExists(projectRoot)) {
-            logger.error('No configuration found. Run "aiagentflow init" first.');
-            process.exit(1);
-        }
+    if (!configExists(projectRoot)) {
+      logger.error('No configuration found. Run "aiagentflow init" first.');
+      process.exit(1);
+    }
 
-        if (options.path) {
-            console.log(getConfigPath(projectRoot));
-            return;
-        }
+    if (options.path) {
+      console.log(getConfigPath(projectRoot));
+      return;
+    }
 
-        const config = loadConfig(projectRoot);
+    const config = loadConfig(projectRoot);
 
-        logger.header('Current Configuration');
-        console.log(chalk.gray(`File: ${getConfigPath(projectRoot)}`));
-        console.log();
-        console.log(JSON.stringify(config, null, 2));
-    });
+    logger.header('Current Configuration');
+    console.log(chalk.gray(`File: ${getConfigPath(projectRoot)}`));
+    console.log();
+    console.log(JSON.stringify(config, null, 2));
+  });

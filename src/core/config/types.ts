@@ -10,12 +10,12 @@
 
 import { z } from 'zod';
 import {
-    agentConfigSchema,
-    agentRoleConfigSchema,
-    appConfigSchema,
-    providerConfigSchema,
-    projectConfigSchema,
-    workflowConfigSchema,
+  agentConfigSchema,
+  agentRoleConfigSchema,
+  appConfigSchema,
+  providerConfigSchema,
+  projectConfigSchema,
+  workflowConfigSchema,
 } from './schema.js';
 
 /** Complete application configuration. */

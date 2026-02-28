@@ -17,12 +17,12 @@ import { logger } from '../../utils/logger.js';
 
 /** A loaded reference document. */
 export interface ContextDocument {
-    /** Where the document was loaded from (file path). */
-    source: string;
-    /** Display name for the document. */
-    name: string;
-    /** File content. */
-    content: string;
+  /** Where the document was loaded from (file path). */
+  source: string;
+  /** Display name for the document. */
+  name: string;
+  /** File content. */
+  content: string;
 }
 
 const CONTEXT_DIR = 'context';
@@ -35,83 +35,83 @@ const CONTEXT_DIR = 'context';
  * @returns Array of loaded context documents (deduped by resolved path)
  */
 export function loadContextDocuments(
-    projectRoot: string,
-    explicitPaths?: string[],
+  projectRoot: string,
+  explicitPaths?: string[],
 ): ContextDocument[] {
-    const seen = new Set<string>();
-    const documents: ContextDocument[] = [];
+  const seen = new Set<string>();
+  const documents: ContextDocument[] = [];
 
-    // Load explicit paths first
-    if (explicitPaths) {
-        for (const filePath of explicitPaths) {
-            const resolved = resolve(projectRoot, filePath);
+  // Load explicit paths first
+  if (explicitPaths) {
+    for (const filePath of explicitPaths) {
+      const resolved = resolve(projectRoot, filePath);
 
-            if (seen.has(resolved)) continue;
-            seen.add(resolved);
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
 
-            if (!existsSync(resolved)) {
-                logger.warn(`Context file not found: ${filePath}`);
-                continue;
-            }
+      if (!existsSync(resolved)) {
+        logger.warn(`Context file not found: ${filePath}`);
+        continue;
+      }
 
-            try {
-                documents.push({
-                    source: resolved,
-                    name: basename(resolved),
-                    content: readTextFile(resolved),
-                });
-                logger.debug(`Loaded context: ${filePath}`);
-            } catch {
-                logger.warn(`Failed to read context file: ${filePath}`);
-            }
-        }
+      try {
+        documents.push({
+          source: resolved,
+          name: basename(resolved),
+          content: readTextFile(resolved),
+        });
+        logger.debug(`Loaded context: ${filePath}`);
+      } catch {
+        logger.warn(`Failed to read context file: ${filePath}`);
+      }
     }
+  }
 
-    // Auto-discover from .aiagentflow/context/
-    const contextDir = join(projectRoot, CONFIG_DIR_NAME, CONTEXT_DIR);
-    if (existsSync(contextDir)) {
-        const entries = readdirSync(contextDir, { withFileTypes: true });
+  // Auto-discover from .aiagentflow/context/
+  const contextDir = join(projectRoot, CONFIG_DIR_NAME, CONTEXT_DIR);
+  if (existsSync(contextDir)) {
+    const entries = readdirSync(contextDir, { withFileTypes: true });
 
-        for (const entry of entries) {
-            if (!entry.isFile()) continue;
-            if (!/\.(md|txt)$/i.test(entry.name)) continue;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!/\.(md|txt)$/i.test(entry.name)) continue;
 
-            const resolved = join(contextDir, entry.name);
+      const resolved = join(contextDir, entry.name);
 
-            if (seen.has(resolved)) continue;
-            seen.add(resolved);
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
 
-            try {
-                documents.push({
-                    source: resolved,
-                    name: entry.name,
-                    content: readTextFile(resolved),
-                });
-                logger.debug(`Auto-loaded context: ${entry.name}`);
-            } catch {
-                logger.warn(`Failed to read context file: ${entry.name}`);
-            }
-        }
+      try {
+        documents.push({
+          source: resolved,
+          name: entry.name,
+          content: readTextFile(resolved),
+        });
+        logger.debug(`Auto-loaded context: ${entry.name}`);
+      } catch {
+        logger.warn(`Failed to read context file: ${entry.name}`);
+      }
     }
+  }
 
-    if (documents.length > 0) {
-        logger.info(`Loaded ${documents.length} context document(s)`);
-    }
+  if (documents.length > 0) {
+    logger.info(`Loaded ${documents.length} context document(s)`);
+  }
 
-    return documents;
+  return documents;
 }
 
 /**
  * Format context documents as a markdown section for agent prompts.
  */
 export function formatContextForAgent(documents: ContextDocument[]): string {
-    if (documents.length === 0) return '';
+  if (documents.length === 0) return '';
 
-    const parts: string[] = ['## Reference Documents', ''];
+  const parts: string[] = ['## Reference Documents', ''];
 
-    for (const doc of documents) {
-        parts.push(`### ${doc.name}`, '', doc.content, '');
-    }
+  for (const doc of documents) {
+    parts.push(`### ${doc.name}`, '', doc.content, '');
+  }
 
-    return parts.join('\n');
+  return parts.join('\n');
 }

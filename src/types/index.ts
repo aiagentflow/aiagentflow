@@ -7,33 +7,33 @@
 
 // Re-export all error types
 export {
-    AppError,
-    ConfigError,
-    ProviderError,
-    GitError,
-    WorkflowError,
-    ValidationError,
+  AppError,
+  ConfigError,
+  ProviderError,
+  GitError,
+  WorkflowError,
+  ValidationError,
 } from '../core/errors.js';
 
 // Re-export config types
 export type {
-    AppConfig,
-    ProviderConfig,
-    ProjectConfig,
-    WorkflowConfig,
-    AgentConfig,
-    AgentRoleConfig,
+  AppConfig,
+  ProviderConfig,
+  ProjectConfig,
+  WorkflowConfig,
+  AgentConfig,
+  AgentRoleConfig,
 } from '../core/config/types.js';
 
 // Re-export provider types
 export type {
-    LLMProvider,
-    ChatMessage,
-    ChatOptions,
-    ChatResponse,
-    ChatChunk,
-    ModelInfo,
-    LLMProviderName,
+  LLMProvider,
+  ChatMessage,
+  ChatOptions,
+  ChatResponse,
+  ChatChunk,
+  ModelInfo,
+  LLMProviderName,
 } from '../providers/types.js';
 
 // Re-export agent types

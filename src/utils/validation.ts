@@ -21,27 +21,27 @@ export const portNumber = z.number().int().min(1).max(65535);
  * Does NOT validate against the provider — just basic format.
  */
 export const apiKeyFormat = z
-    .string()
-    .trim()
-    .min(8, 'API key seems too short')
-    .refine((val) => !/\s/.test(val), 'API key must not contain whitespace');
+  .string()
+  .trim()
+  .min(8, 'API key seems too short')
+  .refine((val) => !/\s/.test(val), 'API key must not contain whitespace');
 
 /**
  * Validate a model name string (alphanumeric, hyphens, colons, dots, slashes).
  * Examples: "claude-3-5-sonnet-20241022", "llama3.2:latest", "gpt-4o"
  */
 export const modelName = z
-    .string()
-    .trim()
-    .min(1, 'Model name cannot be empty')
-    .regex(
-        /^[a-zA-Z0-9][a-zA-Z0-9\-_.:\/]*$/,
-        'Model name must start with alphanumeric and contain only alphanumeric, hyphens, underscores, dots, colons, or slashes',
-    );
+  .string()
+  .trim()
+  .min(1, 'Model name cannot be empty')
+  .regex(
+    /^[a-zA-Z0-9][a-zA-Z0-9\-_.:\/]*$/,
+    'Model name must start with alphanumeric and contain only alphanumeric, hyphens, underscores, dots, colons, or slashes',
+  );
 
 /**
  * Validate a positive integer within a reasonable range.
  */
 export function positiveInt(max: number = 100): z.ZodNumber {
-    return z.number().int().min(1).max(max);
+  return z.number().int().min(1).max(max);
 }
