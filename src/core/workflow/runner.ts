@@ -114,7 +114,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
                 });
 
                 // Transition based on agent output
-                ctx = applyAgentOutput(ctx, agentRole, output.content, config, projectRoot, qaPolicy);
+                ctx = await applyAgentOutput(ctx, agentRole, output.content, config, projectRoot, qaPolicy);
             } catch (err) {
                 spinner.fail(`${agentRole} failed`);
 
@@ -190,14 +190,14 @@ function getLatestOutput(ctx: WorkflowContext): string | undefined {
 /**
  * Apply an agent's output to the workflow context via state transition.
  */
-function applyAgentOutput(
+async function applyAgentOutput(
     ctx: WorkflowContext,
     role: string,
     content: string,
     config: AppConfig,
     projectRoot: string,
     qaPolicy: QAPolicy,
-): WorkflowContext {
+): Promise<WorkflowContext> {
     switch (role) {
         case 'architect':
             if (ctx.state === 'idle') {
@@ -236,10 +236,17 @@ function applyAgentOutput(
                 payload: { testFiles: testFiles.length > 0 ? testFiles : ['(no test files parsed)'] },
             });
 
-            // Auto-run tests if configured
+            // Auto-run tests and transition based on results
             if (config.workflow.autoRunTests) {
-                logger.info('Auto-running tests after tester agent...');
-                // TODO: Await runTests() and transition based on results
+                const testResult = await runTests(projectRoot);
+                if (testResult.passed) {
+                    ctx = transition(ctx, { type: 'TESTS_PASSED' });
+                } else {
+                    ctx = transition(ctx, { type: 'TESTS_FAILED', payload: { failures: testResult.output } });
+                }
+            } else {
+                // Skip test execution — assume tests pass
+                ctx = transition(ctx, { type: 'TESTS_PASSED' });
             }
 
             return ctx;
