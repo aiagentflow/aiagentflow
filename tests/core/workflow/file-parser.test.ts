@@ -97,6 +97,18 @@ export function greet() { return "hi"; }
         expect(files).toHaveLength(1);
         expect(files[0].path).toBe('src/greet.ts');
     });
+
+    it('parses inline backtick filename reference before code block', () => {
+        const output = `Here is the implementation in \`src/greet.ts\`:
+
+\`\`\`typescript
+export function greet(name: string) { return "Hello " + name; }
+\`\`\``;
+
+        const files = parseFiles(output);
+        expect(files).toHaveLength(1);
+        expect(files[0].path).toBe('src/greet.ts');
+    });
 });
 
 describe('writeFiles', () => {

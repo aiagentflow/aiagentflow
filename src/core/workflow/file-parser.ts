@@ -95,6 +95,26 @@ export function parseFiles(output: string): ParsedFile[] {
         }
     }
 
+    // Pattern 5: Inline filename reference before code block
+    // e.g., `greeting.ts`:  or  Here is greeting.ts:  or  (greeting.ts)
+    if (files.length === 0) {
+        const inlinePattern = /`([^\s`]+\.\w{1,4})`[:\s]*\n+```\w*\n([\s\S]*?)```/g;
+        match = inlinePattern.exec(output);
+        while (match !== null) {
+            const path = match[1]?.trim();
+            const content = match[2];
+            if (path && content) {
+                files.push({ path, content });
+            }
+            match = inlinePattern.exec(output);
+        }
+    }
+
+    if (files.length === 0) {
+        logger.debug('File parser: no patterns matched. Output preview: ' +
+            output.substring(0, 200).replace(/\n/g, '\\n'));
+    }
+
     return files;
 }
 
