@@ -148,7 +148,7 @@ export function transition(
     const isFixLoop = nextState === 'review_rejected' || (nextState === 'fix_applied' && currentState === 'tests_failed');
     const newIteration = isFixLoop ? context.iteration + 1 : context.iteration;
 
-    if (newIteration > context.maxIterations) {
+    if (newIteration >= context.maxIterations) {
         throw new WorkflowError(
             `Max iterations (${context.maxIterations}) exceeded. Stopping workflow.`,
             { iteration: newIteration, maxIterations: context.maxIterations },

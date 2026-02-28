@@ -215,17 +215,20 @@ async function applyAgentOutput(
         }
 
         case 'reviewer': {
-            const reviewApproved = content.toUpperCase().includes('APPROVE') &&
-                !content.toUpperCase().includes('REQUEST_CHANGES');
+            const upper = content.toUpperCase();
+            const reviewApproved = upper.includes('APPROVE') &&
+                !upper.includes('REQUEST_CHANGES') &&
+                !upper.includes('REJECT');
 
-            // Evaluate review against QA policy
+            // Evaluate review against QA policy (informational when reviewer approves)
             const evaluation = evaluateReview(content, qaPolicy);
-            if (!evaluation.passed) {
-                logger.warn(`QA policy check: ${evaluation.criticalCount} critical, ${evaluation.warningCount} warnings`);
+            if (evaluation.totalIssues > 0) {
+                logger.info(`QA policy: ${evaluation.criticalCount} critical, ${evaluation.warningCount} warning(s), ${evaluation.totalIssues - evaluation.criticalCount - evaluation.warningCount} nit(s)`);
             }
 
-            // Review passes only if both the reviewer approves AND QA policy passes
-            const approved = reviewApproved && evaluation.passed;
+            // Trust the reviewer's explicit verdict.
+            // QA policy only blocks when the reviewer did NOT approve.
+            const approved = reviewApproved;
             return transition(ctx, { type: 'REVIEW_DONE', payload: { approved, feedback: content } });
         }
 

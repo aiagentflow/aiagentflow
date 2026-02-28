@@ -135,24 +135,29 @@ interface ReviewIssue {
 /**
  * Parse a review output to extract issues with severity.
  *
- * Looks for patterns like:
+ * Matches only structured issue markers where the severity keyword
+ * appears as a label at the start of a line (optionally bulleted/numbered),
+ * e.g.:
  * - **CRITICAL**: description
- * - **WARNING**: description
- * - **NIT**: description
+ * - CRITICAL: description
+ * - 1. WARNING: description
+ * - NIT: description
+ *
+ * Does NOT match casual mentions like "no critical issues found".
  */
 function parseReviewIssues(content: string): ReviewIssue[] {
     const issues: ReviewIssue[] = [];
     const lines = content.split('\n');
 
-    for (const line of lines) {
-        const lower = line.toLowerCase();
+    // Matches lines where severity keyword appears as a structured label:
+    // Optional leading bullet/number, optional markdown bold, then KEYWORD followed by colon
+    const issuePattern = /^\s*(?:[-*•]|\d+[.)]\s*)?\s*\*{0,2}(CRITICAL|WARNING|NIT)\*{0,2}\s*:/i;
 
-        if (lower.includes('critical') && (lower.includes(':') || lower.includes('-'))) {
-            issues.push({ severity: 'critical', description: line.trim() });
-        } else if (lower.includes('warning') && (lower.includes(':') || lower.includes('-'))) {
-            issues.push({ severity: 'warning', description: line.trim() });
-        } else if (lower.includes('nit') && (lower.includes(':') || lower.includes('-'))) {
-            issues.push({ severity: 'nit', description: line.trim() });
+    for (const line of lines) {
+        const match = line.match(issuePattern);
+        if (match?.[1]) {
+            const severity = match[1].toLowerCase() as 'critical' | 'warning' | 'nit';
+            issues.push({ severity, description: line.trim() });
         }
     }
 

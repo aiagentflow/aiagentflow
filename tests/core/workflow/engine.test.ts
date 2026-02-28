@@ -106,12 +106,12 @@ describe('transition', () => {
     });
 
     it('throws when max iterations exceeded', () => {
-        let ctx = createWorkflowContext('task', 1);
+        let ctx = createWorkflowContext('task', 2);
         ctx = transition(ctx, { type: 'SPEC_READY', payload: { spec: 'spec' } });
         ctx = transition(ctx, { type: 'PLAN_APPROVED', payload: { plan: 'plan' } });
         ctx = transition(ctx, { type: 'CODE_GENERATED', payload: { files: ['app.ts'] } });
 
-        // First review rejection counts as iteration 1 (= maxIterations)
+        // First review rejection counts as iteration 1
         ctx = transition(ctx, { type: 'REVIEW_DONE', payload: { approved: false, feedback: 'fix it' } });
         expect(ctx.state).toBe('review_rejected');
         expect(ctx.iteration).toBe(1);
@@ -120,7 +120,7 @@ describe('transition', () => {
         ctx = transition(ctx, { type: 'FIX_APPLIED', payload: { files: ['app.ts'] } });
         ctx = transition(ctx, { type: 'CODE_GENERATED', payload: { files: ['app.ts'] } });
 
-        // Second review rejection should exceed max iterations
+        // Second review rejection should hit max iterations (iteration 2 >= maxIterations 2)
         expect(() =>
             transition(ctx, { type: 'REVIEW_DONE', payload: { approved: false, feedback: 'still bad' } }),
         ).toThrow(WorkflowError);

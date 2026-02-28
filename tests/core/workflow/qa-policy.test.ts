@@ -66,6 +66,43 @@ describe('evaluateReview', () => {
         expect(result.passed).toBe(true);
         expect(result.totalIssues).toBe(2);
     });
+
+    it('ignores casual mentions of severity words', () => {
+        const review = `The code looks good. There are no critical issues found.
+I see no warnings or problems. The implementation handles edge cases well.
+Overall this is a solid piece of work - nothing critical to report.`;
+        const result = evaluateReview(review, DEFAULT_QA_POLICY);
+
+        expect(result.passed).toBe(true);
+        expect(result.criticalCount).toBe(0);
+        expect(result.warningCount).toBe(0);
+    });
+
+    it('detects structured issue markers with bullets', () => {
+        const review = `
+      - **CRITICAL**: Missing input validation
+      - WARNING: Consider using const
+      * NIT: trailing whitespace
+    `;
+        const result = evaluateReview(review, DEFAULT_QA_POLICY);
+
+        expect(result.passed).toBe(false);
+        expect(result.criticalCount).toBe(1);
+        expect(result.warningCount).toBe(1);
+        expect(result.totalIssues).toBe(3);
+    });
+
+    it('detects numbered issue markers', () => {
+        const review = `
+      1. CRITICAL: SQL injection
+      2. WARNING: Missing type annotation
+    `;
+        const result = evaluateReview(review, DEFAULT_QA_POLICY);
+
+        expect(result.passed).toBe(false);
+        expect(result.criticalCount).toBe(1);
+        expect(result.warningCount).toBe(1);
+    });
 });
 
 describe('formatPolicyForAgent', () => {
