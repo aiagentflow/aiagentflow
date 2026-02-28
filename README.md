@@ -56,7 +56,8 @@ aiagentflow run --batch tasks.txt --auto
 ```
 
 The `init` wizard walks you through:
-1. Select your LLM providers (Anthropic, Ollama)
+
+1. Select your LLM providers (Anthropic, OpenAI, Ollama)
 2. Enter API keys
 3. Assign models per agent role
 4. Set workflow preferences
@@ -72,7 +73,7 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 - **Context-aware** — feed specs, PRDs, architecture docs, and guidelines to every agent
 - **Plan from docs** — generate batch-ready task lists from your existing documentation
 - **Local-first** — runs entirely on your machine, no code leaves your system
-- **Provider-agnostic** — Anthropic (Claude), Ollama (local models), more coming
+- **Provider-agnostic** — Anthropic (Claude), OpenAI (GPT), Ollama (local models), more coming
 - **Configurable** — tune models, temperature, and iteration limits per agent
 - **Git-native** — auto-creates branches for each task
 - **Human-in-the-loop** — approve or override at any stage, or go full auto
@@ -86,41 +87,42 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 
 ## CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `aiagentflow init` | Interactive setup wizard |
-| `aiagentflow config` | View current configuration |
-| `aiagentflow doctor` | Health check — verify providers and setup |
-| `aiagentflow run <task>` | Run a workflow for a task |
-| `aiagentflow run <task> --auto` | Autonomous mode (no approval prompts) |
-| `aiagentflow run <task> --context <files...>` | Run with reference documents |
-| `aiagentflow run --batch tasks.txt` | Process multiple tasks from a file |
-| `aiagentflow plan <docs...>` | Generate a task list from documentation |
-| `aiagentflow plan <docs...> -o tasks.txt` | Write task list to file (batch-ready) |
+| Command                                       | Description                               |
+| --------------------------------------------- | ----------------------------------------- |
+| `aiagentflow init`                            | Interactive setup wizard                  |
+| `aiagentflow config`                          | View current configuration                |
+| `aiagentflow doctor`                          | Health check — verify providers and setup |
+| `aiagentflow run <task>`                      | Run a workflow for a task                 |
+| `aiagentflow run <task> --auto`               | Autonomous mode (no approval prompts)     |
+| `aiagentflow run <task> --context <files...>` | Run with reference documents              |
+| `aiagentflow run --batch tasks.txt`           | Process multiple tasks from a file        |
+| `aiagentflow plan <docs...>`                  | Generate a task list from documentation   |
+| `aiagentflow plan <docs...> -o tasks.txt`     | Write task list to file (batch-ready)     |
 
 ---
 
 ## Agent Roles
 
-| Agent | Role | What it does |
-|-------|------|-------------|
-| 🧠 Architect | Plan | Analyzes the task and creates an implementation plan |
-| 💻 Coder | Implement | Writes production-ready code based on the plan |
-| 🔍 Reviewer | Review | Reviews code for bugs, security, and quality |
-| 🧪 Tester | Test | Generates tests and runs them |
-| 🐛 Fixer | Fix | Addresses review comments and test failures |
-| ✅ Judge | QA | Final quality gate — pass or fail |
+| Agent        | Role      | What it does                                         |
+| ------------ | --------- | ---------------------------------------------------- |
+| 🧠 Architect | Plan      | Analyzes the task and creates an implementation plan |
+| 💻 Coder     | Implement | Writes production-ready code based on the plan       |
+| 🔍 Reviewer  | Review    | Reviews code for bugs, security, and quality         |
+| 🧪 Tester    | Test      | Generates tests and runs them                        |
+| 🐛 Fixer     | Fix       | Addresses review comments and test failures          |
+| ✅ Judge     | QA        | Final quality gate — pass or fail                    |
 
 ---
 
 ## Supported Providers
 
-| Provider | Type | Setup |
-|----------|------|-------|
-| **Anthropic** | Cloud API | Requires `ANTHROPIC_API_KEY` |
-| **Ollama** | Local | Requires [Ollama](https://ollama.com) running locally |
+| Provider      | Type      | Setup                                                 |
+| ------------- | --------- | ----------------------------------------------------- |
+| **Anthropic** | Cloud API | Requires `ANTHROPIC_API_KEY`                          |
+| **OpenAI**    | Cloud API | Requires `OPENAI_API_KEY`                             |
+| **Ollama**    | Local     | Requires [Ollama](https://ollama.com) running locally |
 
-More providers (OpenAI, Groq, etc.) can be added by implementing a single adapter file.
+More providers (Groq, etc.) can be added by implementing a single adapter file.
 
 ### Using with Ollama (free, local)
 
@@ -136,6 +138,26 @@ aiagentflow init
 # → Select "ollama" as provider
 # → Enter model name: llama3.2
 ```
+
+### Using with OpenAI (cloud API)
+
+```bash
+# Get your API key from https://platform.openai.com/api-keys
+export OPENAI_API_KEY=your-api-key
+
+# Initialize aiagentflow with OpenAI
+aiagentflow init
+# → Select "openai" as provider
+# → Enter your API key
+# → Choose a model: gpt-4o, gpt-4o-mini, gpt-4-turbo, or gpt-3.5-turbo
+```
+
+Available OpenAI models:
+
+- `gpt-4o` - Most capable model, 128K context
+- `gpt-4o-mini` - Fast and cost-effective, 128K context
+- `gpt-4-turbo` - High performance, 128K context
+- `gpt-3.5-turbo` - Fast and affordable, 16K context
 
 ---
 
@@ -188,13 +210,13 @@ aiagentflow run "Add OAuth support" --context docs/oauth-spec.md docs/auth-arch.
 
 ### What to include
 
-| Document type | Example | Why it helps |
-|---------------|---------|-------------|
-| API specs | `api-spec.md` | Agents generate correct endpoints and contracts |
-| Requirements / PRDs | `requirements.md` | Architect plans match your actual requirements |
-| Security guidelines | `security.md` | Reviewer catches violations against your policies |
-| Architecture docs | `architecture.md` | Coder follows your patterns and conventions |
-| Development guidelines | `dev-guidelines.md` | All agents follow your team's standards |
+| Document type          | Example             | Why it helps                                      |
+| ---------------------- | ------------------- | ------------------------------------------------- |
+| API specs              | `api-spec.md`       | Agents generate correct endpoints and contracts   |
+| Requirements / PRDs    | `requirements.md`   | Architect plans match your actual requirements    |
+| Security guidelines    | `security.md`       | Reviewer catches violations against your policies |
+| Architecture docs      | `architecture.md`   | Coder follows your patterns and conventions       |
+| Development guidelines | `dev-guidelines.md` | All agents follow your team's standards           |
 
 ### Plan command
 
@@ -280,7 +302,8 @@ Contributions are welcome! Here's how to get started:
 - [x] QA policies, token tracking, session persistence
 - [x] Context documents — feed specs, PRDs, and guidelines to agents
 - [x] Plan command — generate task lists from documentation
-- [ ] More providers (OpenAI, Groq, Mistral)
+- [x] OpenAI provider support
+- [ ] More providers (Groq, Mistral)
 - [ ] VSCode extension
 - [ ] Desktop GUI
 
