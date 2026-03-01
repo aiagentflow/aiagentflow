@@ -24,11 +24,11 @@ export interface TestResult {
  * Run the project's test suite.
  *
  * @param projectRoot - Root directory of the project
- * @param testCommand - The test command to run (default: 'pnpm test')
+ * @param testCommand - The test command to run (default: 'npm test')
  */
 export async function runTests(
     projectRoot: string,
-    testCommand: string = 'pnpm test',
+    testCommand: string = 'npm test',
 ): Promise<TestResult> {
     const parts = testCommand.split(' ');
     const cmd = parts[0] ?? 'pnpm';
@@ -45,15 +45,16 @@ export async function runTests(
         });
 
         const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
-        const passed = result.exitCode === 0;
+        const exitCode = result.exitCode ?? (result.failed ? 1 : 0);
+        const passed = exitCode === 0;
 
         if (passed) {
             logger.success('Tests passed');
         } else {
-            logger.warn(`Tests failed (exit code: ${result.exitCode})`);
+            logger.warn(`Tests failed (exit code: ${exitCode})`);
         }
 
-        return { passed, output, exitCode: result.exitCode ?? 1 };
+        return { passed, output, exitCode };
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger.error(`Failed to run tests: ${message}`);
