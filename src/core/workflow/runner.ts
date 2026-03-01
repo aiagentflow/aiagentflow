@@ -29,7 +29,7 @@ import { requestApproval, needsApproval } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
 import { saveSession } from './session.js';
 import { loadQAPolicy, evaluateReview, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
-import { loadContextDocuments, formatContextForAgent, type ContextDocument } from './context-loader.js';
+import { loadContextDocuments, formatContextForAgent, loadSourceFiles, formatSourcesForAgent, type ContextDocument } from './context-loader.js';
 import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
@@ -61,6 +61,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     const tokenTracker = new TokenTracker();
     const qaPolicy = loadQAPolicy(projectRoot);
     const contextDocs = loadContextDocuments(projectRoot, contextPaths);
+    const sourceDocs = loadSourceFiles(projectRoot, config.project.sourceGlobs);
 
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
@@ -106,7 +107,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             try {
                 const agentInput = {
                     task: ctx.task,
-                    context: buildAgentContext(ctx, config, qaPolicy, contextDocs),
+                    context: buildAgentContext(ctx, config, agentRole, qaPolicy, contextDocs, sourceDocs),
                     previousOutput: getLatestOutput(ctx),
                 };
 
@@ -196,7 +197,14 @@ function getTestCommand(config: AppConfig): string {
 }
 
 /** Build context string for the current agent based on workflow state. */
-function buildAgentContext(ctx: WorkflowContext, config: AppConfig, qaPolicy?: QAPolicy, contextDocs?: ContextDocument[]): string {
+function buildAgentContext(
+    ctx: WorkflowContext,
+    config: AppConfig,
+    agentRole: string,
+    qaPolicy?: QAPolicy,
+    contextDocs?: ContextDocument[],
+    sourceDocs?: ContextDocument[],
+): string {
     const parts: string[] = [];
 
     // Inject project settings so agents know the language, framework, and test tools
@@ -212,6 +220,12 @@ function buildAgentContext(ctx: WorkflowContext, config: AppConfig, qaPolicy?: Q
     // Inject reference documents so all agents see them
     if (contextDocs && contextDocs.length > 0) {
         parts.push(formatContextForAgent(contextDocs));
+    }
+
+    // Inject existing source files for agents that generate code
+    const codeAgents = ['coder', 'fixer', 'tester'];
+    if (sourceDocs && sourceDocs.length > 0 && codeAgents.includes(agentRole)) {
+        parts.push(formatSourcesForAgent(sourceDocs));
     }
 
     if (ctx.spec) parts.push(`## Spec\n${ctx.spec}`);
