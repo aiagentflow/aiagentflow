@@ -13,6 +13,7 @@ import type { LLMProviderName } from '../../providers/types.js';
 import type { ProviderConfig } from '../../core/config/types.js';
 import { createProvider, clearProviderCache } from '../../providers/registry.js';
 import { PROVIDER_DEFAULT_MODELS } from '../../providers/metadata.js';
+import { logger } from '../../utils/logger.js';
 
 /** Maximum number of models to show in a simple select list. */
 const SELECT_THRESHOLD = 20;
@@ -42,7 +43,7 @@ export async function pickModel(
         spinner.stop();
 
         if (models.length === 0) {
-            return await fallbackTextInput(message, defaultModel);
+            return await fallbackTextInput(message, defaultModel, 'no models installed');
         }
 
         // Build choices sorted alphabetically
@@ -86,17 +87,20 @@ export async function pickModel(
             },
         });
         return model ?? null;
-    } catch {
+    } catch (err) {
         spinner.stop();
-        return await fallbackTextInput(message, defaultModel);
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.debug(`Model picker failed for ${providerName}: ${reason}`);
+        return await fallbackTextInput(message, defaultModel, 'connection failed');
     }
 }
 
-async function fallbackTextInput(message: string, defaultModel: string): Promise<string | null> {
+async function fallbackTextInput(message: string, defaultModel: string, reason?: string): Promise<string | null> {
+    const hint = reason ? ` (${reason} — enter model manually)` : ' (enter model manually)';
     const { model } = await prompts({
         type: 'text',
         name: 'model',
-        message: `${message} (could not fetch model list)`,
+        message: `${message}${hint}`,
         initial: defaultModel,
     });
     return model ?? null;
