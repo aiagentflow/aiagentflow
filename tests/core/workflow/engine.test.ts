@@ -19,6 +19,7 @@ describe('createWorkflowContext', () => {
         expect(ctx.task).toBe('build a login page');
         expect(ctx.iteration).toBe(0);
         expect(ctx.history).toHaveLength(0);
+        expect(ctx.previousFailures).toEqual([]);
     });
 
     it('accepts custom maxIterations', () => {

@@ -311,7 +311,14 @@ async function applyAgentOutput(
                 if (testResult.passed) {
                     ctx = transition(ctx, { type: 'TESTS_PASSED' });
                 } else {
-                    ctx = transition(ctx, { type: 'TESTS_FAILED', payload: { failures: testResult.output } });
+                    // Detect repeated failures — break infinite fix loops
+                    if (isRepeatedFailure(testResult.output, ctx.previousFailures)) {
+                        logger.warn('Repeated test failure detected — same errors after fix attempt. Stopping.');
+                        ctx = transition(ctx, { type: 'ABORT', payload: { reason: 'Repeated test failure — fixer could not resolve the issue' } });
+                    } else {
+                        ctx.previousFailures.push(testResult.output);
+                        ctx = transition(ctx, { type: 'TESTS_FAILED', payload: { failures: testResult.output } });
+                    }
                 }
             } else {
                 // Skip test execution — assume tests pass
@@ -383,4 +390,36 @@ function printWorkflowSummary(ctx: WorkflowContext): void {
     } else {
         logger.warn(`Task stopped in state: ${ctx.state}`);
     }
+}
+
+/**
+ * Check if a test failure output matches any previous failure.
+ * Uses line-level similarity — if >80% of non-empty lines match, it's a repeat.
+ */
+function isRepeatedFailure(current: string, previous: string[]): boolean {
+    if (previous.length === 0) return false;
+
+    const currentLines = normalizeLines(current);
+    if (currentLines.length === 0) return false;
+
+    for (const prev of previous) {
+        const prevLines = normalizeLines(prev);
+        if (prevLines.length === 0) continue;
+
+        const matched = currentLines.filter((line) => prevLines.includes(line)).length;
+        const similarity = matched / Math.max(currentLines.length, prevLines.length);
+
+        if (similarity > 0.8) return true;
+    }
+
+    return false;
+}
+
+/** Normalize test output lines for comparison — trim, drop empties and timestamps. */
+function normalizeLines(output: string): string[] {
+    return output
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0)
+        .filter((l) => !/^\d{4}-\d{2}-\d{2}/.test(l)); // drop timestamp lines
 }

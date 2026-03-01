@@ -71,6 +71,8 @@ export interface WorkflowContext {
     testFiles: string[];
     /** Test failure details. */
     testFailures?: string;
+    /** Previous test failure outputs (for detecting repeated errors). */
+    previousFailures: string[];
     /** History of all state transitions. */
     history: Array<{ from: WorkflowStateValue; to: WorkflowStateValue; event: string; timestamp: number }>;
 }
@@ -119,6 +121,7 @@ export function createWorkflowContext(task: string, maxIterations: number = 5): 
         maxIterations,
         generatedFiles: [],
         testFiles: [],
+        previousFailures: [],
         history: [],
     };
 }
