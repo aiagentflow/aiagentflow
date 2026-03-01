@@ -109,6 +109,8 @@ export const workflowConfigSchema = z.object({
     branchPrefix: z.string().default('aiagentflow/'),
     /** Whether to auto-run tests after code generation. */
     autoRunTests: z.boolean().default(true),
+    /** Custom test command override (e.g., 'go test ./...'). Derived from testFramework if not set. */
+    testCommand: z.string().optional(),
 });
 
 /**
