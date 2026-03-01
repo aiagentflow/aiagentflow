@@ -1,6 +1,6 @@
 {
   "name": "@aiagentflow/cli",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A local-first, CLI-driven multi-agent AI software engineering workflow orchestrator — feed specs, PRDs, and guidelines to auto-generate implementation plans and code",
   "type": "module",
   "bin": {
