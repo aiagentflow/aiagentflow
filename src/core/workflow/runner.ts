@@ -106,7 +106,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             try {
                 const agentInput = {
                     task: ctx.task,
-                    context: buildAgentContext(ctx, qaPolicy, contextDocs),
+                    context: buildAgentContext(ctx, config, qaPolicy, contextDocs),
                     previousOutput: getLatestOutput(ctx),
                 };
 
@@ -174,11 +174,42 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 
 // ── Private helpers ──
 
+/** Resolve the test command from config, falling back to framework-based defaults. */
+function getTestCommand(config: AppConfig): string {
+    if (config.workflow.testCommand) {
+        return config.workflow.testCommand;
+    }
+
+    const framework = config.project.testFramework.toLowerCase();
+    const commandMap: Record<string, string> = {
+        'vitest': 'npx vitest run',
+        'jest': 'npx jest',
+        'pytest': 'pytest',
+        'go test': 'go test ./...',
+        'cargo test': 'cargo test',
+        'junit': 'mvn test',
+        'rspec': 'bundle exec rspec',
+        'phpunit': 'vendor/bin/phpunit',
+    };
+
+    return commandMap[framework] ?? 'npm test';
+}
+
 /** Build context string for the current agent based on workflow state. */
-function buildAgentContext(ctx: WorkflowContext, qaPolicy?: QAPolicy, contextDocs?: ContextDocument[]): string {
+function buildAgentContext(ctx: WorkflowContext, config: AppConfig, qaPolicy?: QAPolicy, contextDocs?: ContextDocument[]): string {
     const parts: string[] = [];
 
-    // Inject reference documents first so all agents see them
+    // Inject project settings so agents know the language, framework, and test tools
+    parts.push([
+        '## Project Settings',
+        `- Language: ${config.project.language}`,
+        `- Framework: ${config.project.framework}`,
+        `- Test framework: ${config.project.testFramework}`,
+        '',
+        'IMPORTANT: All code MUST be written in the language and framework specified above.',
+    ].join('\n'));
+
+    // Inject reference documents so all agents see them
     if (contextDocs && contextDocs.length > 0) {
         parts.push(formatContextForAgent(contextDocs));
     }
@@ -262,7 +293,7 @@ async function applyAgentOutput(
 
             // Auto-run tests and transition based on results
             if (config.workflow.autoRunTests) {
-                const testResult = await runTests(projectRoot);
+                const testResult = await runTests(projectRoot, getTestCommand(config));
                 if (testResult.passed) {
                     ctx = transition(ctx, { type: 'TESTS_PASSED' });
                 } else {

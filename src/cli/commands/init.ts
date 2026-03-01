@@ -119,7 +119,8 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
             type: 'text',
             name: 'testFramework',
             message: 'Test framework:',
-            initial: 'vitest',
+            initial: (_prev: unknown, answers: { language?: string }) =>
+                getDefaultTestFramework(answers.language ?? 'typescript'),
         },
     ]);
 
@@ -408,6 +409,17 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     config.workflow.humanApproval = workflowAnswers.humanApproval ?? true;
     config.workflow.autoCreateBranch = workflowAnswers.autoCreateBranch ?? true;
 
+    const defaultTestCmd = getDefaultTestCommand(config.project.testFramework);
+    const { testCommand } = await prompts({
+        type: 'text',
+        name: 'testCommand',
+        message: 'Test command:',
+        initial: defaultTestCmd,
+    });
+    if (testCommand && testCommand !== defaultTestCmd) {
+        config.workflow.testCommand = testCommand;
+    }
+
     // ── Step 6: Context Documents ──
     logger.step(6, 6, 'Context Documents');
     console.log(chalk.gray('  Agents perform better with reference docs (specs, PRDs, guidelines).'));
@@ -457,4 +469,31 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     }
 
     return config;
+}
+
+/** Get the default test framework based on the selected language. */
+function getDefaultTestFramework(language: string): string {
+    const defaults: Record<string, string> = {
+        typescript: 'vitest',
+        javascript: 'vitest',
+        python: 'pytest',
+        go: 'go test',
+        rust: 'cargo test',
+        java: 'junit',
+    };
+    return defaults[language] ?? 'npm test';
+}
+
+/** Get the default test command for a given test framework. */
+function getDefaultTestCommand(testFramework: string): string {
+    const commands: Record<string, string> = {
+        'vitest': 'npx vitest run',
+        'jest': 'npx jest',
+        'pytest': 'pytest',
+        'go test': 'go test ./...',
+        'cargo test': 'cargo test',
+        'junit': 'mvn test',
+        'rspec': 'bundle exec rspec',
+    };
+    return commands[testFramework] ?? 'npm test';
 }
