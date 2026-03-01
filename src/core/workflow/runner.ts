@@ -45,7 +45,7 @@ export interface RunOptions {
     auto?: boolean;
     /** Explicit context file paths to load. */
     contextPaths?: string[];
-    /** Enable streaming output from agents. */
+    /** Stream agent output in real time (default: true, use --no-stream to disable). */
     streaming?: boolean;
 }
 
@@ -56,7 +56,7 @@ export interface RunOptions {
  * Returns the final workflow context with all accumulated data.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task, auto = false, contextPaths, streaming = false } = options;
+    const { projectRoot, task, auto = false, contextPaths, streaming = true } = options;
     const config = loadConfig(projectRoot);
     const tokenTracker = new TokenTracker();
     const qaPolicy = loadQAPolicy(projectRoot);
