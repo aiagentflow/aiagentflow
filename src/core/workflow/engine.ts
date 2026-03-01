@@ -180,19 +180,19 @@ export function transition(
             updated.plan = event.payload.plan;
             break;
         case 'CODE_GENERATED':
-            updated.generatedFiles = [...updated.generatedFiles, ...event.payload.files];
+            updated.generatedFiles = dedup([...updated.generatedFiles, ...event.payload.files]);
             break;
         case 'REVIEW_DONE':
             updated.reviewFeedback = event.payload.feedback;
             break;
         case 'TESTS_WRITTEN':
-            updated.testFiles = [...updated.testFiles, ...event.payload.testFiles];
+            updated.testFiles = dedup([...updated.testFiles, ...event.payload.testFiles]);
             break;
         case 'TESTS_FAILED':
             updated.testFailures = event.payload.failures;
             break;
         case 'FIX_APPLIED':
-            updated.generatedFiles = [...updated.generatedFiles, ...event.payload.files];
+            updated.generatedFiles = dedup([...updated.generatedFiles, ...event.payload.files]);
             break;
         default:
             break;
@@ -233,4 +233,9 @@ function resolveNextState(current: WorkflowStateValue, event: WorkflowEvent): Wo
         case 'ABORT': return WorkflowState.Failed;
         default: return WorkflowState.Failed;
     }
+}
+
+/** Deduplicate a string array while preserving order. */
+function dedup(arr: string[]): string[] {
+    return [...new Set(arr)];
 }

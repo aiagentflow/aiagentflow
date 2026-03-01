@@ -394,32 +394,63 @@ function printWorkflowSummary(ctx: WorkflowContext): void {
 
 /**
  * Check if a test failure output matches any previous failure.
- * Uses line-level similarity — if >80% of non-empty lines match, it's a repeat.
+ *
+ * Uses two strategies:
+ * 1. Error signature match — extracts error types/messages and compares
+ * 2. Line-level similarity — if >50% of meaningful lines match, it's a repeat
  */
 function isRepeatedFailure(current: string, previous: string[]): boolean {
     if (previous.length === 0) return false;
 
+    const currentErrors = extractErrorSignatures(current);
     const currentLines = normalizeLines(current);
-    if (currentLines.length === 0) return false;
 
     for (const prev of previous) {
+        // Strategy 1: same error signatures
+        const prevErrors = extractErrorSignatures(prev);
+        if (currentErrors.length > 0 && prevErrors.length > 0) {
+            const overlap = currentErrors.filter((e) => prevErrors.includes(e)).length;
+            if (overlap / Math.max(currentErrors.length, prevErrors.length) > 0.5) return true;
+        }
+
+        // Strategy 2: line-level similarity
         const prevLines = normalizeLines(prev);
-        if (prevLines.length === 0) continue;
-
-        const matched = currentLines.filter((line) => prevLines.includes(line)).length;
-        const similarity = matched / Math.max(currentLines.length, prevLines.length);
-
-        if (similarity > 0.8) return true;
+        if (currentLines.length > 0 && prevLines.length > 0) {
+            const matched = currentLines.filter((line) => prevLines.includes(line)).length;
+            const similarity = matched / Math.max(currentLines.length, prevLines.length);
+            if (similarity > 0.5) return true;
+        }
     }
 
     return false;
 }
 
-/** Normalize test output lines for comparison — trim, drop empties and timestamps. */
+/** Extract error type/message signatures from test output. */
+function extractErrorSignatures(output: string): string[] {
+    const patterns = [
+        /(?:Error|FAIL|panic|undefined|cannot).*$/gmi,
+        /expected .+ got .+/gi,
+        /no such file or directory/gi,
+    ];
+    const signatures: string[] = [];
+    for (const pattern of patterns) {
+        for (const match of output.matchAll(pattern)) {
+            // Normalize: trim, lowercase, strip paths and line numbers
+            const sig = match[0].trim().toLowerCase()
+                .replace(/\b\d+\b/g, 'N')
+                .replace(/\/[\w./]+/g, '<path>');
+            signatures.push(sig);
+        }
+    }
+    return [...new Set(signatures)];
+}
+
+/** Normalize test output lines for comparison — trim, drop noise. */
 function normalizeLines(output: string): string[] {
     return output
         .split('\n')
         .map((l) => l.trim())
         .filter((l) => l.length > 0)
-        .filter((l) => !/^\d{4}-\d{2}-\d{2}/.test(l)); // drop timestamp lines
+        .filter((l) => !/^\d{4}-\d{2}-\d{2}/.test(l))  // drop timestamp lines
+        .filter((l) => !/^(ok|PASS|\?)/.test(l));        // drop pass/skip lines
 }
