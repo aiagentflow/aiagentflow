@@ -29,7 +29,7 @@ import { requestApproval, needsApproval } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
 import { saveSession } from './session.js';
 import { loadQAPolicy, evaluateReview, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
-import { loadContextDocuments, formatContextForAgent, type ContextDocument } from './context-loader.js';
+import { loadContextDocuments, formatContextForAgent, loadSourceFiles, formatSourcesForAgent, type ContextDocument } from './context-loader.js';
 import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
@@ -45,7 +45,7 @@ export interface RunOptions {
     auto?: boolean;
     /** Explicit context file paths to load. */
     contextPaths?: string[];
-    /** Enable streaming output from agents. */
+    /** Stream agent output in real time (default: true, use --no-stream to disable). */
     streaming?: boolean;
 }
 
@@ -56,11 +56,12 @@ export interface RunOptions {
  * Returns the final workflow context with all accumulated data.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task, auto = false, contextPaths, streaming = false } = options;
+    const { projectRoot, task, auto = false, contextPaths, streaming = true } = options;
     const config = loadConfig(projectRoot);
     const tokenTracker = new TokenTracker();
     const qaPolicy = loadQAPolicy(projectRoot);
     const contextDocs = loadContextDocuments(projectRoot, contextPaths);
+    const sourceDocs = loadSourceFiles(projectRoot, config.project.sourceGlobs);
 
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
@@ -106,7 +107,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             try {
                 const agentInput = {
                     task: ctx.task,
-                    context: buildAgentContext(ctx, config, qaPolicy, contextDocs),
+                    context: buildAgentContext(ctx, config, agentRole, qaPolicy, contextDocs, sourceDocs),
                     previousOutput: getLatestOutput(ctx),
                 };
 
@@ -196,7 +197,14 @@ function getTestCommand(config: AppConfig): string {
 }
 
 /** Build context string for the current agent based on workflow state. */
-function buildAgentContext(ctx: WorkflowContext, config: AppConfig, qaPolicy?: QAPolicy, contextDocs?: ContextDocument[]): string {
+function buildAgentContext(
+    ctx: WorkflowContext,
+    config: AppConfig,
+    agentRole: string,
+    qaPolicy?: QAPolicy,
+    contextDocs?: ContextDocument[],
+    sourceDocs?: ContextDocument[],
+): string {
     const parts: string[] = [];
 
     // Inject project settings so agents know the language, framework, and test tools
@@ -212,6 +220,12 @@ function buildAgentContext(ctx: WorkflowContext, config: AppConfig, qaPolicy?: Q
     // Inject reference documents so all agents see them
     if (contextDocs && contextDocs.length > 0) {
         parts.push(formatContextForAgent(contextDocs));
+    }
+
+    // Inject existing source files for agents that generate code
+    const codeAgents = ['coder', 'fixer', 'tester'];
+    if (sourceDocs && sourceDocs.length > 0 && codeAgents.includes(agentRole)) {
+        parts.push(formatSourcesForAgent(sourceDocs));
     }
 
     if (ctx.spec) parts.push(`## Spec\n${ctx.spec}`);
@@ -297,7 +311,14 @@ async function applyAgentOutput(
                 if (testResult.passed) {
                     ctx = transition(ctx, { type: 'TESTS_PASSED' });
                 } else {
-                    ctx = transition(ctx, { type: 'TESTS_FAILED', payload: { failures: testResult.output } });
+                    // Detect repeated failures — break infinite fix loops
+                    if (isRepeatedFailure(testResult.output, ctx.previousFailures)) {
+                        logger.warn('Repeated test failure detected — same errors after fix attempt. Stopping.');
+                        ctx = transition(ctx, { type: 'ABORT', payload: { reason: 'Repeated test failure — fixer could not resolve the issue' } });
+                    } else {
+                        ctx.previousFailures.push(testResult.output);
+                        ctx = transition(ctx, { type: 'TESTS_FAILED', payload: { failures: testResult.output } });
+                    }
                 }
             } else {
                 // Skip test execution — assume tests pass
@@ -369,4 +390,36 @@ function printWorkflowSummary(ctx: WorkflowContext): void {
     } else {
         logger.warn(`Task stopped in state: ${ctx.state}`);
     }
+}
+
+/**
+ * Check if a test failure output matches any previous failure.
+ * Uses line-level similarity — if >80% of non-empty lines match, it's a repeat.
+ */
+function isRepeatedFailure(current: string, previous: string[]): boolean {
+    if (previous.length === 0) return false;
+
+    const currentLines = normalizeLines(current);
+    if (currentLines.length === 0) return false;
+
+    for (const prev of previous) {
+        const prevLines = normalizeLines(prev);
+        if (prevLines.length === 0) continue;
+
+        const matched = currentLines.filter((line) => prevLines.includes(line)).length;
+        const similarity = matched / Math.max(currentLines.length, prevLines.length);
+
+        if (similarity > 0.8) return true;
+    }
+
+    return false;
+}
+
+/** Normalize test output lines for comparison — trim, drop empties and timestamps. */
+function normalizeLines(output: string): string[] {
+    return output
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0)
+        .filter((l) => !/^\d{4}-\d{2}-\d{2}/.test(l)); // drop timestamp lines
 }
