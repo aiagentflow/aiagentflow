@@ -21,7 +21,8 @@ export const runCommand = new Command('run')
     .option('--batch', 'Treat the argument as a task list file (one task per line)')
     .option('--stop-on-failure', 'Stop the queue on first failure (batch mode)')
     .option('--context <paths...>', 'Context files to load as reference documents')
-    .action(async (task: string, options: { auto?: boolean; batch?: boolean; stopOnFailure?: boolean; context?: string[] }) => {
+    .option('-s, --stream', 'Stream agent output in real time')
+    .action(async (task: string, options: { auto?: boolean; batch?: boolean; stopOnFailure?: boolean; context?: string[]; stream?: boolean }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
@@ -64,6 +65,7 @@ export const runCommand = new Command('run')
                 task,
                 auto: options.auto,
                 contextPaths: options.context,
+                streaming: options.stream,
             });
 
             if (result.state === 'failed') {

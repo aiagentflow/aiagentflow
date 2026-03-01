@@ -19,9 +19,10 @@ describe('getSupportedProviders', () => {
     it('returns all supported providers', () => {
         const providers = getSupportedProviders();
         expect(providers).toContain('anthropic');
+        expect(providers).toContain('gemini');
         expect(providers).toContain('ollama');
         expect(providers).toContain('openai');
-        expect(providers.length).toBe(3);
+        expect(providers.length).toBe(4);
     });
 });
 

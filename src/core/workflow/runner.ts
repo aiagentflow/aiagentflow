@@ -34,6 +34,7 @@ import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
 import { WorkflowError } from '../errors.js';
+import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
 
 export interface RunOptions {
     /** Project root directory. */
@@ -44,6 +45,8 @@ export interface RunOptions {
     auto?: boolean;
     /** Explicit context file paths to load. */
     contextPaths?: string[];
+    /** Enable streaming output from agents. */
+    streaming?: boolean;
 }
 
 /**
@@ -53,7 +56,7 @@ export interface RunOptions {
  * Returns the final workflow context with all accumulated data.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task, auto = false, contextPaths } = options;
+    const { projectRoot, task, auto = false, contextPaths, streaming = false } = options;
     const config = loadConfig(projectRoot);
     const tokenTracker = new TokenTracker();
     const qaPolicy = loadQAPolicy(projectRoot);
@@ -101,13 +104,22 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             const spinner = ora(`Running ${agentRole} agent...`).start();
 
             try {
-                const output = await agent.execute({
+                const agentInput = {
                     task: ctx.task,
                     context: buildAgentContext(ctx, qaPolicy, contextDocs),
                     previousOutput: getLatestOutput(ctx),
-                });
+                };
 
-                spinner.succeed(`${agentRole} complete (${output.tokensUsed} tokens)`);
+                let output;
+                if (streaming) {
+                    spinner.stop();
+                    const renderer = createStreamRenderer(agentRole);
+                    output = await agent.executeStreaming(agentInput, renderer.callbacks);
+                    renderer.finish();
+                } else {
+                    output = await agent.execute(agentInput);
+                    spinner.succeed(`${agentRole} complete (${output.tokensUsed} tokens)`);
+                }
                 lastOutput = output.content;
 
                 // Track token usage
