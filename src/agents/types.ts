@@ -18,6 +18,14 @@ export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
     judge: '✅ Judge',
 };
 
+/** Callbacks for streaming agent execution. */
+export interface StreamCallbacks {
+    /** Called for each text chunk as it arrives. */
+    onChunk?: (text: string) => void;
+    /** Called once when the full response is complete. */
+    onComplete?: (fullText: string) => void;
+}
+
 /** All valid agent roles as an array (for iteration and validation). */
 export const ALL_AGENT_ROLES: readonly AgentRole[] = [
     'architect',

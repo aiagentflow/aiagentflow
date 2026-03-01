@@ -9,7 +9,7 @@
  */
 
 import type { LLMProvider, ChatMessage, ChatOptions, ChatResponse } from '../providers/types.js';
-import type { AgentRole } from './types.js';
+import type { AgentRole, StreamCallbacks } from './types.js';
 import { ProviderError } from '../core/errors.js';
 import { logger } from '../utils/logger.js';
 import { AGENT_ROLE_LABELS } from './types.js';
@@ -109,6 +109,60 @@ export abstract class BaseAgent {
                 `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
                 { role: this.role, model: this.model },
             );
+        }
+    }
+
+    /**
+     * Execute this agent's task with streaming output.
+     *
+     * Uses the provider's stream() method and calls callbacks for each chunk.
+     * Falls back to execute() if streaming fails.
+     */
+    async executeStreaming(input: AgentInput, callbacks?: StreamCallbacks): Promise<AgentOutput> {
+        const label = AGENT_ROLE_LABELS[this.role];
+        logger.info(`${label} starting (streaming)...`);
+
+        const systemPrompt = this.buildSystemPrompt();
+        const userPrompt = this.buildUserPrompt(input);
+
+        const messages: ChatMessage[] = [
+            { role: 'user', content: userPrompt },
+        ];
+
+        const options: ChatOptions = {
+            model: this.model,
+            temperature: this.temperature,
+            maxTokens: this.maxTokens,
+            systemPrompt,
+        };
+
+        try {
+            let accumulated = '';
+            for await (const chunk of this.provider.stream(messages, options)) {
+                if (chunk.content) {
+                    accumulated += chunk.content;
+                    callbacks?.onChunk?.(chunk.content);
+                }
+            }
+
+            callbacks?.onComplete?.(accumulated);
+
+            // Estimate token count: ~4 chars per token
+            // TODO: use per-provider tokenizer for accuracy
+            const estimatedTokens = Math.ceil(accumulated.length / 4);
+
+            logger.success(`${label} complete (~${estimatedTokens} tokens)`);
+
+            return {
+                content: accumulated,
+                role: this.role,
+                tokensUsed: estimatedTokens,
+                success: true,
+            };
+        } catch (err) {
+            logger.warn(`${label} streaming failed, falling back to non-streaming`);
+            logger.debug(`Stream error: ${err instanceof Error ? err.message : String(err)}`);
+            return this.execute(input);
         }
     }
 
