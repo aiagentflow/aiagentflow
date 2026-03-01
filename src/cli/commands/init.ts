@@ -21,6 +21,7 @@ import { ALL_AGENT_ROLES, AGENT_ROLE_LABELS, type AgentRole } from '../../agents
 import type { LLMProviderName } from '../../providers/types.js';
 import { getSupportedProviders } from '../../providers/registry.js';
 import { PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, PROVIDER_DESCRIPTIONS } from '../../providers/metadata.js';
+import { pickModel } from '../utils/model-picker.js';
 import { generateDefaultPrompts } from '../../prompts/library.js';
 import { ensureDir } from '../../utils/fs.js';
 import { logger } from '../../utils/logger.js';
@@ -257,7 +258,12 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
 
             if (!preferredProvider) return null;
 
-            const model = getDefaultModel(preferredProvider);
+            const model = await pickModel(
+                preferredProvider,
+                config.providers,
+                'Model for all agents:',
+            ) ?? getDefaultModel(preferredProvider);
+
             for (const role of ALL_AGENT_ROLES) {
                 config.agents[role] = {
                     ...config.agents[role],
@@ -304,28 +310,26 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
             // Custom: ask per role
             for (const role of ALL_AGENT_ROLES) {
                 const label = AGENT_ROLE_LABELS[role];
-                const roleAnswers = await prompts([
-                    {
-                        type: 'select',
-                        name: 'provider',
-                        message: `${label} — provider:`,
-                        choices: selectedProviders.map((p) => ({ title: providerLabel(p), value: p })),
-                    },
-                    {
-                        type: 'text',
-                        name: 'model',
-                        message: `${label} — model:`,
-                        initial: (_prev: unknown, answers: { provider?: string }) =>
-                            getDefaultModel((answers.provider ?? selectedProviders[0]!) as LLMProviderName),
-                    },
-                ]);
+                const { provider: roleProvider } = await prompts({
+                    type: 'select',
+                    name: 'provider',
+                    message: `${label} — provider:`,
+                    choices: selectedProviders.map((p) => ({ title: providerLabel(p), value: p })),
+                });
 
-                if (!roleAnswers.provider) return null;
+                if (!roleProvider) return null;
+
+                const chosenProvider = roleProvider as LLMProviderName;
+                const model = await pickModel(
+                    chosenProvider,
+                    config.providers,
+                    `${label} — model:`,
+                ) ?? getDefaultModel(chosenProvider);
 
                 config.agents[role] = {
                     ...config.agents[role],
-                    provider: roleAnswers.provider,
-                    model: roleAnswers.model,
+                    provider: chosenProvider,
+                    model,
                 };
             }
         }
@@ -344,12 +348,11 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         });
 
         if (customizeModel) {
-            const { model } = await prompts({
-                type: 'text',
-                name: 'model',
-                message: 'Model to use for all agents:',
-                initial: defaultModel,
-            });
+            const model = await pickModel(
+                defaultProvider,
+                config.providers,
+                'Model to use for all agents:',
+            );
 
             for (const role of ALL_AGENT_ROLES) {
                 config.agents[role] = {
@@ -361,12 +364,11 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         } else {
             for (const role of ALL_AGENT_ROLES) {
                 const label = AGENT_ROLE_LABELS[role];
-                const { model } = await prompts({
-                    type: 'text',
-                    name: 'model',
-                    message: `${label} — model:`,
-                    initial: defaultModel,
-                });
+                const model = await pickModel(
+                    defaultProvider,
+                    config.providers,
+                    `${label} — model:`,
+                );
 
                 config.agents[role] = {
                     ...config.agents[role],
