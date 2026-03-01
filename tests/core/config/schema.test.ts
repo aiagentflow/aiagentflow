@@ -45,6 +45,14 @@ describe('agentRoleConfigSchema', () => {
         expect(result.success).toBe(false);
     });
 
+    it('accepts gemini as a valid provider', () => {
+        const result = agentRoleConfigSchema.safeParse({
+            provider: 'gemini',
+            model: 'gemini-2.0-flash',
+        });
+        expect(result.success).toBe(true);
+    });
+
     it('rejects empty model string', () => {
         const result = agentRoleConfigSchema.safeParse({
             provider: 'anthropic',
@@ -84,6 +92,16 @@ describe('providerConfigSchema', () => {
             anthropic: {},
         });
         expect(result.success).toBe(false);
+    });
+
+    it('accepts gemini config with required fields', () => {
+        const result = providerConfigSchema.safeParse({
+            gemini: { apiKey: 'AIzaSy-test-key-12345678' },
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.data.gemini?.baseUrl).toBe('https://generativelanguage.googleapis.com');
+        }
     });
 
     it('accepts ollama with defaults', () => {

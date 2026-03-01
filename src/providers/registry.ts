@@ -13,6 +13,7 @@
 import type { LLMProvider, LLMProviderName } from './types.js';
 import { AnthropicProvider, type AnthropicProviderConfig } from './anthropic.js';
 import { OllamaProvider, type OllamaProviderConfig } from './ollama.js';
+import { GeminiProvider, type GeminiProviderConfig } from './gemini.js';
 import { OpenAIProvider, type OpenAIProviderConfig } from './openai.js';
 import type { ProviderConfig } from '../core/config/types.js';
 import { ProviderError } from '../core/errors.js';
@@ -32,6 +33,17 @@ const PROVIDER_FACTORIES: Record<LLMProviderName, (config: ProviderConfig) => LL
             );
         }
         return new AnthropicProvider(anthropicConfig as AnthropicProviderConfig);
+    },
+
+    gemini: (config: ProviderConfig) => {
+        const geminiConfig = config.gemini;
+        if (!geminiConfig) {
+            throw new ProviderError(
+                'Gemini provider is not configured. Run "aiagentflow init" to set up.',
+                { provider: 'gemini' },
+            );
+        }
+        return new GeminiProvider(geminiConfig as GeminiProviderConfig);
     },
 
     ollama: (config: ProviderConfig) => {
@@ -107,7 +119,7 @@ export async function validateAllProviders(
     for (const name of getSupportedProviders()) {
         try {
             // Only validate providers that are actually configured
-            if ((name === 'anthropic' && !config.anthropic) || (name === 'openai' && !config.openai)) {
+            if ((name === 'anthropic' && !config.anthropic) || (name === 'gemini' && !config.gemini) || (name === 'openai' && !config.openai)) {
                 results[name] = false;
                 continue;
             }

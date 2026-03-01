@@ -10,7 +10,7 @@
  */
 
 /** Supported LLM provider names. Add new providers here. */
-export type LLMProviderName = 'anthropic' | 'ollama' | 'openai';
+export type LLMProviderName = 'anthropic' | 'gemini' | 'ollama' | 'openai';
 
 /** Role in a chat conversation. */
 export type ChatRole = 'system' | 'user' | 'assistant';

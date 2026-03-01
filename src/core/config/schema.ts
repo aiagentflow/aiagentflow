@@ -15,7 +15,7 @@ import { z } from 'zod';
  */
 export const agentRoleConfigSchema = z.object({
     /** Which provider to use for this agent role. */
-    provider: z.enum(['anthropic', 'ollama', 'openai']),
+    provider: z.enum(['anthropic', 'gemini', 'ollama', 'openai']),
     /** The model identifier to use. */
     model: z.string().min(1),
     /** Sampling temperature (0.0 = deterministic, higher = more creative). */
@@ -53,6 +53,14 @@ export const ollamaProviderSchema = z.object({
 });
 
 /**
+ * Schema for Google Gemini provider settings.
+ */
+export const geminiProviderSchema = z.object({
+    apiKey: z.string().min(1, 'Gemini API key is required'),
+    baseUrl: z.string().url().default('https://generativelanguage.googleapis.com'),
+});
+
+/**
  * Schema for OpenAI provider settings.
  */
 export const openaiProviderSchema = z.object({
@@ -66,6 +74,7 @@ export const openaiProviderSchema = z.object({
  */
 export const providerConfigSchema = z.object({
     anthropic: anthropicProviderSchema.optional(),
+    gemini: geminiProviderSchema.optional(),
     ollama: ollamaProviderSchema.optional(),
     openai: openaiProviderSchema.optional(),
 });
