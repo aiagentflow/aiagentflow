@@ -106,7 +106,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             try {
                 const agentInput = {
                     task: ctx.task,
-                    context: buildAgentContext(ctx, qaPolicy, contextDocs),
+                    context: buildAgentContext(ctx, config, qaPolicy, contextDocs),
                     previousOutput: getLatestOutput(ctx),
                 };
 
@@ -175,10 +175,20 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 // ── Private helpers ──
 
 /** Build context string for the current agent based on workflow state. */
-function buildAgentContext(ctx: WorkflowContext, qaPolicy?: QAPolicy, contextDocs?: ContextDocument[]): string {
+function buildAgentContext(ctx: WorkflowContext, config: AppConfig, qaPolicy?: QAPolicy, contextDocs?: ContextDocument[]): string {
     const parts: string[] = [];
 
-    // Inject reference documents first so all agents see them
+    // Inject project settings so agents know the language, framework, and test tools
+    parts.push([
+        '## Project Settings',
+        `- Language: ${config.project.language}`,
+        `- Framework: ${config.project.framework}`,
+        `- Test framework: ${config.project.testFramework}`,
+        '',
+        'IMPORTANT: All code MUST be written in the language and framework specified above.',
+    ].join('\n'));
+
+    // Inject reference documents so all agents see them
     if (contextDocs && contextDocs.length > 0) {
         parts.push(formatContextForAgent(contextDocs));
     }
