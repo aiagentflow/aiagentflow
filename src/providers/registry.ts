@@ -119,7 +119,7 @@ export async function validateAllProviders(
     for (const name of getSupportedProviders()) {
         try {
             // Only validate providers that are actually configured
-            if ((name === 'anthropic' && !config.anthropic) || (name === 'gemini' && !config.gemini) || (name === 'openai' && !config.openai)) {
+            if (name !== 'ollama' && !config[name as keyof typeof config]) {
                 results[name] = false;
                 continue;
             }

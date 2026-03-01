@@ -51,10 +51,7 @@ export const doctorCommand = new Command('doctor')
             if (healthy) {
                 console.log(chalk.green(`  ✔ ${name} — connected`));
             } else {
-                const isConfigured =
-                    name === 'anthropic' ? !!config.providers.anthropic
-                    : name === 'openai' ? !!config.providers.openai
-                    : !!config.providers.ollama;
+                const isConfigured = !!config.providers[name as keyof typeof config.providers];
 
                 if (isConfigured) {
                     console.log(chalk.red(`  ✘ ${name} — connection failed`));

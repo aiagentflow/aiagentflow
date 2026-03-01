@@ -20,6 +20,7 @@ import type { AppConfig } from '../../core/config/types.js';
 import { ALL_AGENT_ROLES, AGENT_ROLE_LABELS, type AgentRole } from '../../agents/types.js';
 import type { LLMProviderName } from '../../providers/types.js';
 import { getSupportedProviders } from '../../providers/registry.js';
+import { PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, PROVIDER_DESCRIPTIONS } from '../../providers/metadata.js';
 import { generateDefaultPrompts } from '../../prompts/library.js';
 import { ensureDir } from '../../utils/fs.js';
 import { logger } from '../../utils/logger.js';
@@ -134,9 +135,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         name: 'providers',
         message: 'Select LLM providers to configure (space to toggle, enter to confirm):',
         choices: availableProviders.map((p) => ({
-            title: p === 'anthropic' ? 'Anthropic (Claude) — requires API key'
-                 : p === 'openai' ? 'OpenAI (GPT) — requires API key'
-                 : 'Ollama (Local Models) — free, no API key needed',
+            title: PROVIDER_DESCRIPTIONS[p],
             value: p,
             selected: p === 'ollama',
         })),
@@ -186,6 +185,24 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         };
     }
 
+    if (selectedProviders.includes('gemini')) {
+        const geminiAnswers = await prompts([
+            {
+                type: 'password',
+                name: 'apiKey',
+                message: 'Google Gemini API key:',
+                validate: (val: string) => val.length >= 8 || 'API key seems too short',
+            },
+        ]);
+
+        if (!geminiAnswers.apiKey) return null;
+
+        config.providers.gemini = {
+            apiKey: geminiAnswers.apiKey,
+            baseUrl: 'https://generativelanguage.googleapis.com',
+        };
+    }
+
     if (selectedProviders.includes('ollama')) {
         const ollamaAnswers = await prompts({
             type: 'text',
@@ -204,16 +221,8 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
 
     const hasMixableProviders = selectedProviders.length > 1;
 
-    // Helper to get default model for a provider
-    const getDefaultModel = (p: LLMProviderName) =>
-        p === 'anthropic' ? 'claude-sonnet-4-20250514'
-        : p === 'openai' ? 'gpt-4o-mini'
-        : 'llama3.2:latest';
-
-    const providerLabel = (p: LLMProviderName) =>
-        p === 'anthropic' ? 'Anthropic (Claude)'
-        : p === 'openai' ? 'OpenAI (GPT)'
-        : 'Ollama (Local)';
+    const getDefaultModel = (p: LLMProviderName) => PROVIDER_DEFAULT_MODELS[p];
+    const providerLabel = (p: LLMProviderName) => PROVIDER_LABELS[p];
 
     if (hasMixableProviders) {
         // Multiple providers — let user choose assignment strategy
@@ -262,6 +271,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
             // Reasoning roles → cloud (anthropic), generation roles → local (ollama)
             const cloudProvider = selectedProviders.includes('anthropic') ? 'anthropic'
                 : selectedProviders.includes('openai') ? 'openai'
+                : selectedProviders.includes('gemini') ? 'gemini'
                 : selectedProviders[0]!;
             const localProvider = selectedProviders.includes('ollama') ? 'ollama' : selectedProviders[0]!;
 
