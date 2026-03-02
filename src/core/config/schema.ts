@@ -111,6 +111,10 @@ export const workflowConfigSchema = z.object({
     autoRunTests: z.boolean().default(true),
     /** Custom test command override (e.g., 'go test ./...'). Derived from testFramework if not set. */
     testCommand: z.string().optional(),
+    /** Whether to auto-commit changes when QA passes. */
+    autoCommit: z.boolean().default(false),
+    /** Commit message template. Supports {task} placeholder. */
+    autoCommitMessage: z.string().default('ai: {task}'),
 });
 
 /**

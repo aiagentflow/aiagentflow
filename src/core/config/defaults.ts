@@ -59,6 +59,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         autoCreateBranch: true,
         branchPrefix: 'aiagentflow/',
         autoRunTests: true,
+        autoCommit: false,
+        autoCommitMessage: 'ai: {task}',
     },
 };
 

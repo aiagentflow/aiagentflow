@@ -409,6 +409,25 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     config.workflow.humanApproval = workflowAnswers.humanApproval ?? true;
     config.workflow.autoCreateBranch = workflowAnswers.autoCreateBranch ?? true;
 
+    const { autoCommit } = await prompts({
+        type: 'confirm',
+        name: 'autoCommit',
+        message: 'Auto-commit changes when QA passes?',
+        initial: false,
+    });
+
+    config.workflow.autoCommit = autoCommit ?? false;
+
+    if (autoCommit) {
+        const { autoCommitMessage } = await prompts({
+            type: 'text',
+            name: 'autoCommitMessage',
+            message: 'Commit message template ({task} = task description):',
+            initial: 'ai: {task}',
+        });
+        config.workflow.autoCommitMessage = autoCommitMessage || 'ai: {task}';
+    }
+
     const defaultTestCmd = getDefaultTestCommand(config.project.testFramework);
     const { testCommand } = await prompts({
         type: 'text',
