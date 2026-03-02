@@ -163,6 +163,21 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         }
     }
 
+    // Auto-commit if QA passed and autoCommit is enabled
+    if (config.workflow.autoCommit && ctx.state === 'qa_approved') {
+        try {
+            const git = new GitClient(projectRoot);
+            if (await git.isRepo()) {
+                const message = (config.workflow.autoCommitMessage ?? 'ai: {task}')
+                    .replace('{task}', ctx.task);
+                const hash = await git.commitAll(message);
+                logger.success(`Auto-committed: ${hash}`);
+            }
+        } catch (err) {
+            logger.warn(`Auto-commit failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
     // Final save
     saveSession(projectRoot, ctx, tokenTracker.getEntries() as any[], sessionId);
 
