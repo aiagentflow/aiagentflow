@@ -33,6 +33,7 @@ import { loadContextDocuments, formatContextForAgent, loadSourceFiles, formatSou
 import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
+import { buildTestCommand } from '../../utils/package-manager.js';
 import { WorkflowError } from '../errors.js';
 import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
 
@@ -190,25 +191,12 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 
 // ── Private helpers ──
 
-/** Resolve the test command from config, falling back to framework-based defaults. */
-function getTestCommand(config: AppConfig): string {
+/** Resolve the test command from config, falling back to auto-detected defaults. */
+function getTestCommand(config: AppConfig, projectRoot: string): string {
     if (config.workflow.testCommand) {
         return config.workflow.testCommand;
     }
-
-    const framework = config.project.testFramework.toLowerCase();
-    const commandMap: Record<string, string> = {
-        'vitest': 'npx vitest run',
-        'jest': 'npx jest',
-        'pytest': 'pytest',
-        'go test': 'go test ./...',
-        'cargo test': 'cargo test',
-        'junit': 'mvn test',
-        'rspec': 'bundle exec rspec',
-        'phpunit': 'vendor/bin/phpunit',
-    };
-
-    return commandMap[framework] ?? 'npm test';
+    return buildTestCommand(config.project.testFramework, projectRoot);
 }
 
 /** Build context string for the current agent based on workflow state. */
@@ -322,7 +310,7 @@ async function applyAgentOutput(
 
             // Auto-run tests and transition based on results
             if (config.workflow.autoRunTests) {
-                const testResult = await runTests(projectRoot, getTestCommand(config));
+                const testResult = await runTests(projectRoot, getTestCommand(config, projectRoot));
                 if (testResult.passed) {
                     ctx = transition(ctx, { type: 'TESTS_PASSED' });
                 } else {
