@@ -24,6 +24,7 @@ import { PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, PROVIDER_DESCRIPTIONS } from 
 import { pickModel } from '../utils/model-picker.js';
 import { generateDefaultPrompts } from '../../prompts/library.js';
 import { ensureDir } from '../../utils/fs.js';
+import { detectPackageManager, buildTestCommand } from '../../utils/package-manager.js';
 import { logger } from '../../utils/logger.js';
 
 export const initCommand = new Command('init')
@@ -93,6 +94,9 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
 
     // ── Step 1: Project Detection ──
     logger.step(1, 6, 'Project Settings');
+    const pm = detectPackageManager(projectRoot);
+    console.log(chalk.gray(`  Detected package manager: ${pm.name}`));
+    console.log();
     const projectAnswers = await prompts([
         {
             type: 'select',
@@ -428,7 +432,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         config.workflow.autoCommitMessage = autoCommitMessage || 'ai: {task}';
     }
 
-    const defaultTestCmd = getDefaultTestCommand(config.project.testFramework);
+    const defaultTestCmd = buildTestCommand(config.project.testFramework, projectRoot);
     const { testCommand } = await prompts({
         type: 'text',
         name: 'testCommand',
@@ -503,16 +507,3 @@ function getDefaultTestFramework(language: string): string {
     return defaults[language] ?? 'npm test';
 }
 
-/** Get the default test command for a given test framework. */
-function getDefaultTestCommand(testFramework: string): string {
-    const commands: Record<string, string> = {
-        'vitest': 'npx vitest run',
-        'jest': 'npx jest',
-        'pytest': 'pytest',
-        'go test': 'go test ./...',
-        'cargo test': 'cargo test',
-        'junit': 'mvn test',
-        'rspec': 'bundle exec rspec',
-    };
-    return commands[testFramework] ?? 'npm test';
-}
