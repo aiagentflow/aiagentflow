@@ -8,8 +8,8 @@
  * Used by: every module that touches config
  */
 
-import { z } from 'zod';
-import {
+import type { z } from 'zod';
+import type {
     agentConfigSchema,
     agentRoleConfigSchema,
     appConfigSchema,

@@ -10,7 +10,6 @@
 
 import prompts from 'prompts';
 import chalk from 'chalk';
-import { logger } from '../../utils/logger.js';
 import type { WorkflowContext } from './engine.js';
 
 export type ApprovalDecision = 'approve' | 'edit' | 'retry' | 'abort';

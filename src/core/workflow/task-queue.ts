@@ -9,7 +9,7 @@
  */
 
 import chalk from 'chalk';
-import { runWorkflow, type RunOptions } from './runner.js';
+import { runWorkflow } from './runner.js';
 import type { WorkflowContext } from './engine.js';
 import { logger } from '../../utils/logger.js';
 

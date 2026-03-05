@@ -226,7 +226,6 @@ export class OllamaProvider implements LLMProvider {
 
     private async request(path: string, body: Record<string, unknown>, retries = 2): Promise<Record<string, unknown>> {
         let response: Response;
-        let lastError: unknown;
 
         for (let attempt = 0; attempt <= retries; attempt++) {
             try {
@@ -240,7 +239,7 @@ export class OllamaProvider implements LLMProvider {
                 // Success — continue to response handling below
                 break;
             } catch (err) {
-                lastError = err;
+                // Error handled by retry logic or thrown below
                 if (attempt < retries) {
                     logger.debug(`Ollama request failed (attempt ${attempt + 1}/${retries + 1}), retrying...`);
                     await new Promise(r => setTimeout(r, 2000));
