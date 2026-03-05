@@ -29,7 +29,7 @@ export interface SessionData {
     /** The workflow context snapshot. */
     context: WorkflowContext;
     /** Token usage entries. */
-    tokenUsage: TokenUsageEntry[];
+    tokenUsage: readonly TokenUsageEntry[];
 }
 
 /**
@@ -58,7 +58,7 @@ function generateSessionId(task: string): string {
 export function saveSession(
     projectRoot: string,
     context: WorkflowContext,
-    tokenUsage: TokenUsageEntry[] = [],
+    tokenUsage: readonly TokenUsageEntry[] = [],
     sessionId?: string,
 ): string {
     const sessionsDir = getSessionsDir(projectRoot);
