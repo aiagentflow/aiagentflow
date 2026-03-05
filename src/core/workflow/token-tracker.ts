@@ -60,6 +60,15 @@ export class TokenTracker {
     }
 
     /**
+     * Restore previously saved token usage entries (for session resume).
+     */
+    restoreEntries(entries: readonly TokenUsageEntry[]): void {
+        for (const entry of entries) {
+            this.entries.push({ ...entry });
+        }
+    }
+
+    /**
      * Get total tokens used across all agents.
      */
     getTotalTokens(): number {
