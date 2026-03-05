@@ -27,7 +27,7 @@ import { parseAndWriteFiles } from './file-parser.js';
 import { runTests } from './test-runner.js';
 import { requestApproval, needsApproval } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
-import { saveSession } from './session.js';
+import { saveSession, loadSession, listSessions } from './session.js';
 import { loadQAPolicy, evaluateReview, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
 import { loadContextDocuments, formatContextForAgent, loadSourceFiles, formatSourcesForAgent, type ContextDocument } from './context-loader.js';
 import { loadConfig } from '../config/manager.js';
@@ -50,6 +50,19 @@ export interface RunOptions {
     /** Explicit context file paths to load. */
     contextPaths?: string[];
     /** Stream agent output in real time (default: true, use --no-stream to disable). */
+    streaming?: boolean;
+}
+
+export interface ResumeOptions {
+    /** Project root directory. */
+    projectRoot: string;
+    /** Session ID to resume. If not provided, resumes the most recent non-terminal session. */
+    sessionId?: string;
+    /** Skip all human approval gates (autonomous mode). */
+    auto?: boolean;
+    /** Workflow mode override (fast, balanced, strict). Overrides config. */
+    mode?: string;
+    /** Stream agent output in real time (default: true). */
     streaming?: boolean;
 }
 
@@ -95,12 +108,117 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     }
 
     // Create workflow context
-    let ctx = createWorkflowContext(task, config.workflow.maxIterations);
-    let sessionId: string | undefined;
+    const ctx = createWorkflowContext(task, config.workflow.maxIterations);
+
+    return executeWorkflowLoop({
+        ctx,
+        projectRoot,
+        config,
+        tokenTracker,
+        qaPolicy,
+        contextDocs,
+        sourceDocs,
+        auto,
+        streaming,
+    });
+}
+
+/**
+ * Resume an interrupted or failed workflow from a saved session.
+ *
+ * Loads the session, restores state, and re-enters the workflow loop.
+ */
+export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowContext> {
+    const { projectRoot, auto = false, mode, streaming = true } = options;
+    let { sessionId } = options;
+
+    // If no session ID, find the most recent non-terminal session
+    if (!sessionId) {
+        const sessions = listSessions(projectRoot);
+        const resumable = sessions.find(s => !isTerminal(s.context));
+        if (!resumable) {
+            throw new WorkflowError('No resumable sessions found. Run "aiagentflow sessions" to see all sessions.');
+        }
+        sessionId = resumable.id;
+    }
+
+    const session = loadSession(projectRoot, sessionId);
+    if (!session) {
+        throw new WorkflowError(`Session not found: ${sessionId}`, { sessionId });
+    }
+
+    if (isTerminal(session.context)) {
+        throw new WorkflowError(
+            `Session "${sessionId}" is in terminal state "${session.context.state}" and cannot be resumed.`,
+            { sessionId, state: session.context.state },
+        );
+    }
+
+    const config = loadConfig(projectRoot);
+    if (mode) {
+        applyModePreset(config, mode);
+    }
+
+    const tokenTracker = new TokenTracker();
+    tokenTracker.restoreEntries(session.tokenUsage);
+    const qaPolicy = loadQAPolicy(projectRoot);
+    const contextDocs = loadContextDocuments(projectRoot);
+    const sourceDocs = loadSourceFiles(projectRoot, config.project.sourceGlobs);
+
+    logger.header('AI Workflow — Resuming Session');
+    console.log(chalk.gray(`Session: ${sessionId}`));
+    console.log(chalk.gray(`Task: ${session.context.task}`));
+    console.log(chalk.gray(`Resuming from state: ${session.context.state}`));
+    if (mode) {
+        console.log(chalk.blue(`Mode: ${mode}`));
+    }
+    if (auto) {
+        console.log(chalk.yellow('⚡ Autonomous mode — no human approval required'));
+    }
+    console.log();
+
+    return executeWorkflowLoop({
+        ctx: session.context,
+        sessionId,
+        projectRoot,
+        config,
+        tokenTracker,
+        qaPolicy,
+        contextDocs,
+        sourceDocs,
+        auto,
+        streaming,
+    });
+}
+
+// ── Workflow loop ──
+
+interface WorkflowLoopParams {
+    ctx: WorkflowContext;
+    sessionId?: string;
+    projectRoot: string;
+    config: AppConfig;
+    tokenTracker: TokenTracker;
+    qaPolicy: QAPolicy;
+    contextDocs: ContextDocument[];
+    sourceDocs: ContextDocument[];
+    auto: boolean;
+    streaming: boolean;
+}
+
+/**
+ * Core workflow loop — shared by runWorkflow() and resumeWorkflow().
+ *
+ * Executes agents in sequence, handles transitions, saves sessions,
+ * and applies post-loop logic (auto-commit, summaries).
+ */
+async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<WorkflowContext> {
+    const { projectRoot, config, tokenTracker, qaPolicy, contextDocs, sourceDocs, auto, streaming } = params;
+    let ctx = params.ctx;
+    let sessionId = params.sessionId;
     let lastOutput = '';
 
     try {
-        // Main workflow loop
         while (!isTerminal(ctx)) {
             const agentRole = getNextAgent(ctx);
 
