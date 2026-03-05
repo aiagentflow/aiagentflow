@@ -15,7 +15,7 @@ import ora from 'ora';
 import { existsSync, copyFileSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 import { configExists, saveConfig, getDefaultConfig, getConfigPath } from '../../core/config/manager.js';
-import { CONFIG_DIR_NAME } from '../../core/config/defaults.js';
+import { CONFIG_DIR_NAME, WORKFLOW_PRESETS, type WorkflowMode } from '../../core/config/defaults.js';
 import type { AppConfig } from '../../core/config/types.js';
 import { ALL_AGENT_ROLES, AGENT_ROLE_LABELS, type AgentRole } from '../../agents/types.js';
 import type { LLMProviderName } from '../../providers/types.js';
@@ -398,50 +398,86 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
 
     // ── Step 5: Workflow Settings ──
     logger.step(5, 6, 'Workflow Settings');
-    const workflowAnswers = await prompts([
-        {
-            type: 'number',
-            name: 'maxIterations',
-            message: 'Max fix iterations per task:',
-            initial: 5,
-            min: 1,
-            max: 20,
-        },
-        {
-            type: 'confirm',
-            name: 'humanApproval',
-            message: 'Require human approval between stages?',
-            initial: true,
-        },
-        {
-            type: 'confirm',
-            name: 'autoCreateBranch',
-            message: 'Auto-create Git branch for each task?',
-            initial: true,
-        },
-    ]);
 
-    config.workflow.maxIterations = workflowAnswers.maxIterations ?? 5;
-    config.workflow.humanApproval = workflowAnswers.humanApproval ?? true;
-    config.workflow.autoCreateBranch = workflowAnswers.autoCreateBranch ?? true;
+    const { mode } = await prompts({
+        type: 'select',
+        name: 'mode',
+        message: 'Workflow mode:',
+        choices: [
+            { title: 'Fast — fewer iterations, no approval, higher creativity', value: 'fast' },
+            { title: 'Balanced — moderate iterations, approval on (recommended)', value: 'balanced' },
+            { title: 'Strict — more iterations, lower temperatures, thorough QA', value: 'strict' },
+        ],
+        initial: 1,
+    });
 
-    const { autoCommit } = await prompts({
+    const selectedMode = (mode ?? 'balanced') as WorkflowMode;
+    const preset = WORKFLOW_PRESETS[selectedMode];
+    config.workflow.mode = selectedMode;
+    config.workflow.maxIterations = preset.maxIterations;
+    config.workflow.humanApproval = preset.humanApproval;
+    config.workflow.autoCommit = preset.autoCommit;
+
+    // Apply temperature presets to agents
+    for (const [role, temp] of Object.entries(preset.temperatures)) {
+        if (config.agents[role as keyof typeof config.agents]) {
+            config.agents[role as keyof typeof config.agents].temperature = temp;
+        }
+    }
+
+    console.log(chalk.gray(`  Mode: ${selectedMode} — iterations: ${preset.maxIterations}, approval: ${preset.humanApproval ? 'on' : 'off'}, auto-commit: ${preset.autoCommit ? 'on' : 'off'}`));
+
+    const { customize } = await prompts({
         type: 'confirm',
-        name: 'autoCommit',
-        message: 'Auto-commit changes when QA passes?',
+        name: 'customize',
+        message: 'Customize individual settings?',
         initial: false,
     });
 
-    config.workflow.autoCommit = autoCommit ?? false;
+    if (customize) {
+        const customAnswers = await prompts([
+            {
+                type: 'number',
+                name: 'maxIterations',
+                message: 'Max fix iterations per task:',
+                initial: preset.maxIterations,
+                min: 1,
+                max: 20,
+            },
+            {
+                type: 'confirm',
+                name: 'humanApproval',
+                message: 'Require human approval between stages?',
+                initial: preset.humanApproval,
+            },
+            {
+                type: 'confirm',
+                name: 'autoCreateBranch',
+                message: 'Auto-create Git branch for each task?',
+                initial: true,
+            },
+            {
+                type: 'confirm',
+                name: 'autoCommit',
+                message: 'Auto-commit changes when QA passes?',
+                initial: preset.autoCommit,
+            },
+        ]);
 
-    if (autoCommit) {
-        const { autoCommitMessage } = await prompts({
-            type: 'text',
-            name: 'autoCommitMessage',
-            message: 'Commit message template ({task} = task description):',
-            initial: 'ai: {task}',
-        });
-        config.workflow.autoCommitMessage = autoCommitMessage || 'ai: {task}';
+        config.workflow.maxIterations = customAnswers.maxIterations ?? preset.maxIterations;
+        config.workflow.humanApproval = customAnswers.humanApproval ?? preset.humanApproval;
+        config.workflow.autoCreateBranch = customAnswers.autoCreateBranch ?? true;
+        config.workflow.autoCommit = customAnswers.autoCommit ?? preset.autoCommit;
+
+        if (config.workflow.autoCommit) {
+            const { autoCommitMessage } = await prompts({
+                type: 'text',
+                name: 'autoCommitMessage',
+                message: 'Commit message template ({task} = task description):',
+                initial: 'ai: {task}',
+            });
+            config.workflow.autoCommitMessage = autoCommitMessage || 'ai: {task}';
+        }
     }
 
     const defaultTestCmd = buildTestCommand(config.project.testFramework, projectRoot);
