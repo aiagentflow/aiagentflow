@@ -17,7 +17,8 @@ import { loadContextDocuments, formatContextForAgent } from '../../core/workflow
 import { createAgent } from '../../agents/factory.js';
 import { logger } from '../../utils/logger.js';
 
-const PLAN_SYSTEM_PROMPT = `You are a task planner. Given reference documents (PRDs, specs, architecture docs), break them down into a list of implementation tasks.
+// TODO: Use this system prompt via agent.execute({ systemPrompt }) once the agent API supports it
+const _PLAN_SYSTEM_PROMPT = `You are a task planner. Given reference documents (PRDs, specs, architecture docs), break them down into a list of implementation tasks.
 
 ## Rules:
 - Output exactly ONE task per line
@@ -34,6 +35,9 @@ Add input validation middleware for user registration endpoint
 Implement POST /api/users registration endpoint with bcrypt password hashing
 Write unit tests for User model validation
 Write integration tests for registration endpoint`;
+
+// Exported for future use when agent API supports system prompts
+export { _PLAN_SYSTEM_PROMPT as PLAN_SYSTEM_PROMPT };
 
 export const planCommand = new Command('plan')
     .description('Generate a task list from documentation files')

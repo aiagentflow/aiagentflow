@@ -12,7 +12,7 @@
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { CONFIG_DIR_NAME } from '../core/config/defaults.js';
-import { ensureDir, readTextFile, writeJsonFile } from '../utils/fs.js';
+import { ensureDir, readTextFile } from '../utils/fs.js';
 import { writeFileSync } from 'node:fs';
 import type { AgentRole } from '../agents/types.js';
 import { ALL_AGENT_ROLES } from '../agents/types.js';
