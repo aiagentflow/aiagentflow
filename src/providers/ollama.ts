@@ -19,6 +19,7 @@ import type {
     TokenUsage,
 } from './types.js';
 import { logger } from '../utils/logger.js';
+import { fetchWithRetry, OLLAMA_TIMEOUT_MS } from './provider-errors.js';
 
 /** Configuration required to create an Ollama provider. */
 export interface OllamaProviderConfig {
@@ -96,28 +97,11 @@ export class OllamaProvider implements LLMProvider {
             body.options = { ...(body.options as Record<string, unknown> ?? {}), num_predict: options.maxTokens };
         }
 
-        let response: Response;
-        try {
-            response = await fetch(`${this.baseUrl}/api/chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-                signal: AbortSignal.timeout(300_000), // 5 minute timeout
-            });
-        } catch (err) {
-            throw new ProviderError(
-                `Failed to connect to Ollama at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
-                { provider: 'ollama', baseUrl: this.baseUrl },
-            );
-        }
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new ProviderError(
-                `Ollama streaming request failed: ${response.status} ${response.statusText}`,
-                { status: response.status, body: errorBody, provider: 'ollama' },
-            );
-        }
+        const response = await fetchWithRetry(
+            `${this.baseUrl}/api/chat`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+            { provider: 'ollama', baseUrl: this.baseUrl, timeoutMs: OLLAMA_TIMEOUT_MS },
+        );
 
         if (!response.body) {
             throw new ProviderError('Ollama response has no body', { provider: 'ollama' });
@@ -165,31 +149,20 @@ export class OllamaProvider implements LLMProvider {
      * List available models from the local Ollama instance.
      */
     async listModels(): Promise<ModelInfo[]> {
-        try {
-            const response = await fetch(`${this.baseUrl}/api/tags`);
+        const response = await fetchWithRetry(
+            `${this.baseUrl}/api/tags`,
+            { method: 'GET' },
+            { provider: 'ollama', baseUrl: this.baseUrl, timeoutMs: OLLAMA_TIMEOUT_MS },
+        );
 
-            if (!response.ok) {
-                throw new ProviderError(
-                    `Failed to list Ollama models: ${response.status}`,
-                    { provider: 'ollama', status: response.status },
-                );
-            }
+        const data = await response.json() as { models?: Array<Record<string, unknown>> };
+        const models = data.models ?? [];
 
-            const data = await response.json() as { models?: Array<Record<string, unknown>> };
-            const models = data.models ?? [];
-
-            return models.map((m) => ({
-                id: String(m.name ?? m.model ?? ''),
-                name: String(m.name ?? m.model ?? 'Unknown'),
-                provider: 'ollama' as const,
-            }));
-        } catch (err) {
-            if (err instanceof ProviderError) throw err;
-            throw new ProviderError(
-                `Failed to connect to Ollama at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
-                { provider: 'ollama', baseUrl: this.baseUrl },
-            );
-        }
+        return models.map((m) => ({
+            id: String(m.name ?? m.model ?? ''),
+            name: String(m.name ?? m.model ?? 'Unknown'),
+            provider: 'ollama' as const,
+        }));
     }
 
     /**
@@ -224,44 +197,12 @@ export class OllamaProvider implements LLMProvider {
         return result;
     }
 
-    private async request(path: string, body: Record<string, unknown>, retries = 2): Promise<Record<string, unknown>> {
-        let response: Response;
-
-        for (let attempt = 0; attempt <= retries; attempt++) {
-            try {
-                response = await fetch(`${this.baseUrl}${path}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                    signal: AbortSignal.timeout(300_000), // 5 minute timeout
-                });
-
-                // Success — continue to response handling below
-                break;
-            } catch (err) {
-                // Error handled by retry logic or thrown below
-                if (attempt < retries) {
-                    logger.debug(`Ollama request failed (attempt ${attempt + 1}/${retries + 1}), retrying...`);
-                    await new Promise(r => setTimeout(r, 2000));
-                    continue;
-                }
-                throw new ProviderError(
-                    `Failed to connect to Ollama at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
-                    { provider: 'ollama', baseUrl: this.baseUrl },
-                );
-            }
-        }
-
-        // TypeScript needs this — response is always assigned if we reach here
-        response = response!;
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new ProviderError(
-                `Ollama API error: ${response.status} ${response.statusText}`,
-                { status: response.status, body: errorBody, provider: 'ollama' },
-            );
-        }
+    private async request(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+        const response = await fetchWithRetry(
+            `${this.baseUrl}${path}`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+            { provider: 'ollama', baseUrl: this.baseUrl, timeoutMs: OLLAMA_TIMEOUT_MS },
+        );
 
         return response.json() as Promise<Record<string, unknown>>;
     }
