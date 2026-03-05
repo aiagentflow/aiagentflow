@@ -34,6 +34,7 @@ import { loadConfig } from '../config/manager.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
 import { buildTestCommand } from '../../utils/package-manager.js';
+import { WORKFLOW_PRESETS, type WorkflowMode } from '../config/defaults.js';
 import { WorkflowError } from '../errors.js';
 import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
 
@@ -44,6 +45,8 @@ export interface RunOptions {
     task: string;
     /** Skip all human approval gates (autonomous mode). */
     auto?: boolean;
+    /** Workflow mode override (fast, balanced, strict). Overrides config. */
+    mode?: string;
     /** Explicit context file paths to load. */
     contextPaths?: string[];
     /** Stream agent output in real time (default: true, use --no-stream to disable). */
@@ -57,8 +60,14 @@ export interface RunOptions {
  * Returns the final workflow context with all accumulated data.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task, auto = false, contextPaths, streaming = true } = options;
+    const { projectRoot, task, auto = false, mode, contextPaths, streaming = true } = options;
     const config = loadConfig(projectRoot);
+
+    // Apply mode preset override from --mode flag
+    if (mode) {
+        applyModePreset(config, mode);
+    }
+
     const tokenTracker = new TokenTracker();
     const qaPolicy = loadQAPolicy(projectRoot);
     const contextDocs = loadContextDocuments(projectRoot, contextPaths);
@@ -66,6 +75,9 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
+    if (mode) {
+        console.log(chalk.blue(`Mode: ${mode}`));
+    }
     if (auto) {
         console.log(chalk.yellow('⚡ Autonomous mode — no human approval required'));
     }
@@ -197,6 +209,29 @@ function getTestCommand(config: AppConfig, projectRoot: string): string {
         return config.workflow.testCommand;
     }
     return buildTestCommand(config.project.testFramework, projectRoot);
+}
+
+/** Apply a workflow mode preset to the config, overriding relevant fields. */
+function applyModePreset(config: AppConfig, mode: string): void {
+    const validModes = Object.keys(WORKFLOW_PRESETS);
+    if (!validModes.includes(mode)) {
+        throw new WorkflowError(
+            `Invalid workflow mode: "${mode}". Valid modes: ${validModes.join(', ')}`,
+            { mode, validModes },
+        );
+    }
+
+    const preset = WORKFLOW_PRESETS[mode as WorkflowMode];
+    config.workflow.mode = mode as WorkflowMode;
+    config.workflow.maxIterations = preset.maxIterations;
+    config.workflow.humanApproval = preset.humanApproval;
+    config.workflow.autoCommit = preset.autoCommit;
+
+    for (const [role, temp] of Object.entries(preset.temperatures)) {
+        if (config.agents[role as keyof typeof config.agents]) {
+            config.agents[role as keyof typeof config.agents].temperature = temp;
+        }
+    }
 }
 
 /** Build context string for the current agent based on workflow state. */
