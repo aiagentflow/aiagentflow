@@ -54,6 +54,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
 
     workflow: {
+        mode: 'balanced' as const,
         maxIterations: 5,
         humanApproval: true,
         autoCreateBranch: true,
@@ -69,3 +70,60 @@ export const CONFIG_DIR_NAME = '.aiagentflow';
 
 /** The config file name. */
 export const CONFIG_FILE_NAME = 'config.json';
+
+/**
+ * Workflow mode presets.
+ *
+ * Each preset bundles workflow settings and agent temperature overrides
+ * for a common use case: speed, quality, or the default balance.
+ */
+export type WorkflowMode = 'fast' | 'balanced' | 'strict';
+
+export interface WorkflowPreset {
+    maxIterations: number;
+    humanApproval: boolean;
+    autoCommit: boolean;
+    temperatures: Record<string, number>;
+}
+
+export const WORKFLOW_PRESETS: Record<WorkflowMode, WorkflowPreset> = {
+    fast: {
+        maxIterations: 3,
+        humanApproval: false,
+        autoCommit: true,
+        temperatures: {
+            architect: 0.7,
+            coder: 0.5,
+            reviewer: 0.6,
+            tester: 0.5,
+            fixer: 0.5,
+            judge: 0.4,
+        },
+    },
+    balanced: {
+        maxIterations: 5,
+        humanApproval: true,
+        autoCommit: false,
+        temperatures: {
+            architect: 0.5,
+            coder: 0.3,
+            reviewer: 0.4,
+            tester: 0.3,
+            fixer: 0.3,
+            judge: 0.2,
+        },
+    },
+    strict: {
+        maxIterations: 10,
+        humanApproval: true,
+        autoCommit: false,
+        temperatures: {
+            architect: 0.4,
+            coder: 0.2,
+            reviewer: 0.3,
+            tester: 0.2,
+            fixer: 0.2,
+            judge: 0.1,
+        },
+    },
+};
