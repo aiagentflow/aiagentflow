@@ -35,6 +35,8 @@ export interface QueueOptions {
     tasks: string[];
     /** Skip human approval between tasks. */
     auto?: boolean;
+    /** Workflow mode override (fast, balanced, strict). */
+    mode?: string;
     /** Stop the queue on first failure. */
     stopOnFailure?: boolean;
     /** Explicit context file paths to load. */
@@ -47,7 +49,7 @@ export interface QueueOptions {
  * Returns the queue with all results after completion.
  */
 export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]> {
-    const { projectRoot, tasks, auto = false, stopOnFailure = false, contextPaths } = options;
+    const { projectRoot, tasks, auto = false, mode, stopOnFailure = false, contextPaths } = options;
 
     const queue: QueuedTask[] = tasks.map(task => ({
         task,
@@ -56,6 +58,7 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
 
     logger.header('AI Workflow — Task Queue');
     console.log(chalk.gray(`${queue.length} task(s) queued`));
+    if (mode) console.log(chalk.blue(`Mode: ${mode}`));
     if (auto) console.log(chalk.yellow('⚡ Autonomous mode'));
     console.log();
 
@@ -73,6 +76,7 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
                 projectRoot,
                 task: item.task,
                 auto,
+                mode,
                 contextPaths,
             });
 
