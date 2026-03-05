@@ -141,6 +141,11 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     config.project.framework = projectAnswers.framework;
     config.project.testFramework = projectAnswers.testFramework;
 
+    // Set language-appropriate globs
+    const globs = getLanguageGlobs(projectAnswers.language);
+    config.project.sourceGlobs = globs.sourceGlobs;
+    config.project.testGlobs = globs.testGlobs;
+
     // ── Step 2: Provider Selection ──
     logger.step(2, 6, 'LLM Providers');
     const providerAnswers = await prompts({
@@ -501,4 +506,16 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     return config;
 }
 
-
+/** Get language-appropriate source and test glob patterns. */
+function getLanguageGlobs(language: string): { sourceGlobs: string[]; testGlobs: string[] } {
+    const globs: Record<string, { sourceGlobs: string[]; testGlobs: string[] }> = {
+        typescript: { sourceGlobs: ['src/**/*.{ts,tsx}'], testGlobs: ['tests/**/*.test.ts'] },
+        javascript: { sourceGlobs: ['src/**/*.{js,jsx}'], testGlobs: ['tests/**/*.test.js'] },
+        python: { sourceGlobs: ['src/**/*.py'], testGlobs: ['tests/**/*.py'] },
+        go: { sourceGlobs: ['**/*.go'], testGlobs: ['**/*_test.go'] },
+        rust: { sourceGlobs: ['src/**/*.rs'], testGlobs: ['tests/**/*.rs'] },
+        java: { sourceGlobs: ['src/**/*.java'], testGlobs: ['src/test/**/*.java'] },
+        ruby: { sourceGlobs: ['lib/**/*.rb'], testGlobs: ['spec/**/*.rb'] },
+    };
+    return globs[language] ?? { sourceGlobs: ['src/**/*.ts'], testGlobs: ['tests/**/*.test.ts'] };
+}
