@@ -19,6 +19,7 @@ import type {
     TokenUsage,
 } from './types.js';
 import { logger } from '../utils/logger.js';
+import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
 
 /** Configuration required to create an OpenAI provider. */
 export interface OpenAIProviderConfig {
@@ -114,19 +115,11 @@ export class OpenAIProvider implements LLMProvider {
             body.temperature = options.temperature;
         }
 
-        const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify(body),
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new ProviderError(
-                `OpenAI streaming request failed: ${response.status} ${response.statusText}`,
-                { status: response.status, body: errorBody, provider: 'openai' },
-            );
-        }
+        const response = await fetchWithRetry(
+            `${this.baseUrl}/v1/chat/completions`,
+            { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(body) },
+            { provider: 'openai', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
 
         if (!response.body) {
             throw new ProviderError('OpenAI response has no body', { provider: 'openai' });
@@ -179,34 +172,20 @@ export class OpenAIProvider implements LLMProvider {
      * List available models from the OpenAI API.
      */
     async listModels(): Promise<ModelInfo[]> {
-        try {
-            const response = await fetch(`${this.baseUrl}/v1/models`, {
-                method: 'GET',
-                headers: this.getHeaders(),
-            });
+        const response = await fetchWithRetry(
+            `${this.baseUrl}/v1/models`,
+            { method: 'GET', headers: this.getHeaders() },
+            { provider: 'openai', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
 
-            if (!response.ok) {
-                throw new ProviderError(
-                    `OpenAI models request failed: ${response.status}`,
-                    { provider: 'openai' },
-                );
-            }
+        const body = await response.json() as { data?: Array<{ id: string }> };
+        const models = body.data ?? [];
 
-            const body = await response.json() as { data?: Array<{ id: string }> };
-            const models = body.data ?? [];
-
-            return models.map((m) => ({
-                id: m.id,
-                name: m.id,
-                provider: 'openai' as const,
-            }));
-        } catch (err) {
-            if (err instanceof ProviderError) throw err;
-            throw new ProviderError(
-                `Failed to list OpenAI models: ${err instanceof Error ? err.message : String(err)}`,
-                { provider: 'openai' },
-            );
-        }
+        return models.map((m) => ({
+            id: m.id,
+            name: m.id,
+            provider: 'openai' as const,
+        }));
     }
 
     /**
@@ -241,28 +220,11 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     private async request(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-        let response: Response;
-
-        try {
-            response = await fetch(`${this.baseUrl}${path}`, {
-                method: 'POST',
-                headers: this.getHeaders(),
-                body: JSON.stringify(body),
-            });
-        } catch (err) {
-            throw new ProviderError(
-                `Failed to connect to OpenAI API: ${err instanceof Error ? err.message : String(err)}`,
-                { provider: 'openai', baseUrl: this.baseUrl },
-            );
-        }
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new ProviderError(
-                `OpenAI API error: ${response.status} ${response.statusText}`,
-                { status: response.status, body: errorBody, provider: 'openai' },
-            );
-        }
+        const response = await fetchWithRetry(
+            `${this.baseUrl}${path}`,
+            { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(body) },
+            { provider: 'openai', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
 
         return response.json() as Promise<Record<string, unknown>>;
     }

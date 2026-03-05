@@ -19,6 +19,7 @@ import type {
     TokenUsage,
 } from './types.js';
 import { logger } from '../utils/logger.js';
+import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
 
 /** Configuration required to create a Gemini provider. */
 export interface GeminiProviderConfig {
@@ -129,19 +130,11 @@ export class GeminiProvider implements LLMProvider {
 
         const url = `${this.baseUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new ProviderError(
-                `Gemini streaming request failed: ${response.status} ${response.statusText}`,
-                { status: response.status, body: errorBody, provider: 'gemini' },
-            );
-        }
+        const response = await fetchWithRetry(
+            url,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+            { provider: 'gemini', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
 
         if (!response.body) {
             throw new ProviderError('Gemini response has no body', { provider: 'gemini' });
@@ -200,32 +193,21 @@ export class GeminiProvider implements LLMProvider {
      * List available models from the Gemini API.
      */
     async listModels(): Promise<ModelInfo[]> {
-        try {
-            const url = `${this.baseUrl}/v1beta/models?key=${this.apiKey}`;
-            const response = await fetch(url, { method: 'GET' });
+        const url = `${this.baseUrl}/v1beta/models?key=${this.apiKey}`;
+        const response = await fetchWithRetry(
+            url,
+            { method: 'GET' },
+            { provider: 'gemini', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
 
-            if (!response.ok) {
-                throw new ProviderError(
-                    `Gemini models request failed: ${response.status}`,
-                    { provider: 'gemini' },
-                );
-            }
+        const body = await response.json() as { models?: Array<{ name: string; displayName?: string }> };
+        const models = body.models ?? [];
 
-            const body = await response.json() as { models?: Array<{ name: string; displayName?: string }> };
-            const models = body.models ?? [];
-
-            return models.map((m) => ({
-                id: m.name.replace(/^models\//, ''),
-                name: m.displayName ?? m.name.replace(/^models\//, ''),
-                provider: 'gemini' as const,
-            }));
-        } catch (err) {
-            if (err instanceof ProviderError) throw err;
-            throw new ProviderError(
-                `Failed to list Gemini models: ${err instanceof Error ? err.message : String(err)}`,
-                { provider: 'gemini' },
-            );
-        }
+        return models.map((m) => ({
+            id: m.name.replace(/^models\//, ''),
+            name: m.displayName ?? m.name.replace(/^models\//, ''),
+            provider: 'gemini' as const,
+        }));
     }
 
     /**
@@ -253,28 +235,11 @@ export class GeminiProvider implements LLMProvider {
 
     private async request(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
         const url = this.buildUrl(path);
-        let response: Response;
-
-        try {
-            response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-        } catch (err) {
-            throw new ProviderError(
-                `Failed to connect to Gemini API: ${err instanceof Error ? err.message : String(err)}`,
-                { provider: 'gemini', baseUrl: this.baseUrl },
-            );
-        }
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new ProviderError(
-                `Gemini API error: ${response.status} ${response.statusText}`,
-                { status: response.status, body: errorBody, provider: 'gemini' },
-            );
-        }
+        const response = await fetchWithRetry(
+            url,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+            { provider: 'gemini', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
 
         return response.json() as Promise<Record<string, unknown>>;
     }
