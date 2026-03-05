@@ -13,6 +13,8 @@ import { configCommand } from './commands/config.js';
 import { doctorCommand } from './commands/doctor.js';
 import { runCommand } from './commands/run.js';
 import { planCommand } from './commands/plan.js';
+import { resumeCommand } from './commands/resume.js';
+import { sessionsCommand } from './commands/sessions.js';
 
 const program = new Command();
 
@@ -27,5 +29,7 @@ program.addCommand(configCommand);
 program.addCommand(doctorCommand);
 program.addCommand(runCommand);
 program.addCommand(planCommand);
+program.addCommand(resumeCommand);
+program.addCommand(sessionsCommand);
 
 program.parse();
