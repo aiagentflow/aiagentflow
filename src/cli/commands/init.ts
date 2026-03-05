@@ -25,6 +25,7 @@ import { pickModel } from '../utils/model-picker.js';
 import { generateDefaultPrompts } from '../../prompts/library.js';
 import { ensureDir } from '../../utils/fs.js';
 import { detectPackageManager, buildTestCommand } from '../../utils/package-manager.js';
+import { detectProject } from '../../utils/project-detector.js';
 import { logger } from '../../utils/logger.js';
 
 export const initCommand = new Command('init')
@@ -95,36 +96,42 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     // ── Step 1: Project Detection ──
     logger.step(1, 6, 'Project Settings');
     const pm = detectPackageManager(projectRoot);
-    console.log(chalk.gray(`  Detected package manager: ${pm.name}`));
+    const detected = detectProject(projectRoot);
+
+    console.log(chalk.gray(`  Detected: ${detected.language} / ${detected.framework} / ${detected.testFramework} (${pm.name})`));
     console.log();
+
+    const languageChoices = [
+        { title: 'TypeScript', value: 'typescript' },
+        { title: 'JavaScript', value: 'javascript' },
+        { title: 'Python', value: 'python' },
+        { title: 'Go', value: 'go' },
+        { title: 'Rust', value: 'rust' },
+        { title: 'Java', value: 'java' },
+        { title: 'Ruby', value: 'ruby' },
+        { title: 'Other', value: 'other' },
+    ];
+    const detectedLangIndex = languageChoices.findIndex(c => c.value === detected.language);
+
     const projectAnswers = await prompts([
         {
             type: 'select',
             name: 'language',
             message: 'Primary programming language:',
-            choices: [
-                { title: 'TypeScript', value: 'typescript' },
-                { title: 'JavaScript', value: 'javascript' },
-                { title: 'Python', value: 'python' },
-                { title: 'Go', value: 'go' },
-                { title: 'Rust', value: 'rust' },
-                { title: 'Java', value: 'java' },
-                { title: 'Other', value: 'other' },
-            ],
-            initial: 0,
+            choices: languageChoices,
+            initial: detectedLangIndex >= 0 ? detectedLangIndex : 0,
         },
         {
             type: 'text',
             name: 'framework',
             message: 'Framework (or "none"):',
-            initial: 'none',
+            initial: detected.framework,
         },
         {
             type: 'text',
             name: 'testFramework',
             message: 'Test framework:',
-            initial: (_prev: unknown, answers: { language?: string }) =>
-                getDefaultTestFramework(answers.language ?? 'typescript'),
+            initial: detected.testFramework,
         },
     ]);
 
@@ -133,6 +140,11 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     config.project.language = projectAnswers.language;
     config.project.framework = projectAnswers.framework;
     config.project.testFramework = projectAnswers.testFramework;
+
+    // Set language-appropriate globs
+    const globs = getLanguageGlobs(projectAnswers.language);
+    config.project.sourceGlobs = globs.sourceGlobs;
+    config.project.testGlobs = globs.testGlobs;
 
     // ── Step 2: Provider Selection ──
     logger.step(2, 6, 'LLM Providers');
@@ -494,16 +506,16 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     return config;
 }
 
-/** Get the default test framework based on the selected language. */
-function getDefaultTestFramework(language: string): string {
-    const defaults: Record<string, string> = {
-        typescript: 'vitest',
-        javascript: 'vitest',
-        python: 'pytest',
-        go: 'go test',
-        rust: 'cargo test',
-        java: 'junit',
+/** Get language-appropriate source and test glob patterns. */
+function getLanguageGlobs(language: string): { sourceGlobs: string[]; testGlobs: string[] } {
+    const globs: Record<string, { sourceGlobs: string[]; testGlobs: string[] }> = {
+        typescript: { sourceGlobs: ['src/**/*.{ts,tsx}'], testGlobs: ['tests/**/*.test.ts'] },
+        javascript: { sourceGlobs: ['src/**/*.{js,jsx}'], testGlobs: ['tests/**/*.test.js'] },
+        python: { sourceGlobs: ['src/**/*.py'], testGlobs: ['tests/**/*.py'] },
+        go: { sourceGlobs: ['**/*.go'], testGlobs: ['**/*_test.go'] },
+        rust: { sourceGlobs: ['src/**/*.rs'], testGlobs: ['tests/**/*.rs'] },
+        java: { sourceGlobs: ['src/**/*.java'], testGlobs: ['src/test/**/*.java'] },
+        ruby: { sourceGlobs: ['lib/**/*.rb'], testGlobs: ['spec/**/*.rb'] },
     };
-    return defaults[language] ?? 'npm test';
+    return globs[language] ?? { sourceGlobs: ['src/**/*.ts'], testGlobs: ['tests/**/*.test.ts'] };
 }
-
