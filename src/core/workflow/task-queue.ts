@@ -41,6 +41,8 @@ export interface QueueOptions {
     stopOnFailure?: boolean;
     /** Explicit context file paths to load. */
     contextPaths?: string[];
+    /** Preview workflow plan without executing agents. */
+    dryRun?: boolean;
 }
 
 /**
@@ -49,7 +51,7 @@ export interface QueueOptions {
  * Returns the queue with all results after completion.
  */
 export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]> {
-    const { projectRoot, tasks, auto = false, mode, stopOnFailure = false, contextPaths } = options;
+    const { projectRoot, tasks, auto = false, mode, stopOnFailure = false, contextPaths, dryRun } = options;
 
     const queue: QueuedTask[] = tasks.map(task => ({
         task,
@@ -78,6 +80,7 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
                 auto,
                 mode,
                 contextPaths,
+                dryRun,
             });
 
             item.result = result;

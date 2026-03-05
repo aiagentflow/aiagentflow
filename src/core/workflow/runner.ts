@@ -21,6 +21,8 @@ import {
     getNextAgent,
     type WorkflowContext,
 } from './engine.js';
+import type { AgentRole } from '../../agents/types.js';
+import { AGENT_ROLE_LABELS } from '../../agents/types.js';
 import { createAgent } from '../../agents/factory.js';
 import { GitClient } from '../../git/client.js';
 import { parseAndWriteFiles } from './file-parser.js';
@@ -51,6 +53,8 @@ export interface RunOptions {
     contextPaths?: string[];
     /** Stream agent output in real time (default: true, use --no-stream to disable). */
     streaming?: boolean;
+    /** Preview workflow plan without executing agents. */
+    dryRun?: boolean;
 }
 
 export interface ResumeOptions {
@@ -73,7 +77,7 @@ export interface ResumeOptions {
  * Returns the final workflow context with all accumulated data.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task, auto = false, mode, contextPaths, streaming = true } = options;
+    const { projectRoot, task, auto = false, mode, contextPaths, streaming = true, dryRun = false } = options;
     const config = loadConfig(projectRoot);
 
     // Apply mode preset override from --mode flag
@@ -85,6 +89,12 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     const qaPolicy = loadQAPolicy(projectRoot);
     const contextDocs = loadContextDocuments(projectRoot, contextPaths);
     const sourceDocs = loadSourceFiles(projectRoot, config.project.sourceGlobs);
+
+    // Dry-run: show execution plan and exit
+    if (dryRun) {
+        printDryRun(task, config, contextDocs, sourceDocs, auto);
+        return createWorkflowContext(task, config.workflow.maxIterations);
+    }
 
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
@@ -317,6 +327,97 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
     tokenTracker.printSummary();
 
     return ctx;
+}
+
+// ── Dry-run ──
+
+/**
+ * Print workflow execution plan without calling any agents.
+ */
+function printDryRun(
+    task: string,
+    config: AppConfig,
+    contextDocs: ContextDocument[],
+    sourceDocs: ContextDocument[],
+    auto: boolean,
+): void {
+    logger.header('AI Workflow — Dry Run');
+    console.log(chalk.gray(`Task: ${task}`));
+    console.log(chalk.gray(`Mode: ${config.workflow.mode}`));
+    console.log(chalk.gray(`Max iterations: ${config.workflow.maxIterations}`));
+    console.log();
+
+    // Show the happy-path agent pipeline
+    const happyPath: { state: string; role: AgentRole; description: string }[] = [
+        { state: 'idle', role: 'architect', description: 'Analyze task and create implementation plan' },
+        { state: 'plan_approved', role: 'coder', description: 'Generate code from the plan' },
+        { state: 'code_generated', role: 'reviewer', description: 'Review generated code' },
+        { state: 'review_done', role: 'tester', description: 'Write and run tests' },
+        { state: 'tests_passed', role: 'judge', description: 'Final QA verdict' },
+    ];
+
+    console.log(chalk.bold('  Agent Pipeline'));
+    console.log();
+
+    for (let i = 0; i < happyPath.length; i++) {
+        const step = happyPath[i]!;
+        const agentConfig = config.agents[step.role];
+        const label = AGENT_ROLE_LABELS[step.role];
+
+        console.log(chalk.bold(`  ${i + 1}. ${label}`));
+        console.log(chalk.gray(`     Provider: ${agentConfig.provider} / ${agentConfig.model}`));
+        console.log(chalk.gray(`     Temperature: ${agentConfig.temperature} | Max tokens: ${agentConfig.maxTokens}`));
+        console.log(chalk.gray(`     ${step.description}`));
+        console.log();
+    }
+
+    // Show fix loops
+    console.log(chalk.bold('  Fix Loops'));
+    console.log();
+
+    const fixerConfig = config.agents.fixer;
+    console.log(chalk.gray(`  If review is rejected or tests fail, the ${AGENT_ROLE_LABELS.fixer} agent retries.`));
+    console.log(chalk.gray(`  Provider: ${fixerConfig.provider} / ${fixerConfig.model}`));
+    console.log(chalk.gray(`  Max iterations: ${config.workflow.maxIterations}`));
+    console.log();
+
+    // Context documents
+    if (contextDocs.length > 0) {
+        console.log(chalk.bold('  Context Documents'));
+        for (const doc of contextDocs) {
+            console.log(chalk.gray(`    ${doc.source} (${doc.content.length} chars)`));
+        }
+        console.log();
+    }
+
+    // Source files
+    if (sourceDocs.length > 0) {
+        console.log(chalk.bold('  Source Files'));
+        console.log(chalk.gray(`    ${sourceDocs.length} file(s) matching ${config.project.sourceGlobs.join(', ')}`));
+        const totalChars = sourceDocs.reduce((sum, d) => sum + d.content.length, 0);
+        console.log(chalk.gray(`    Total: ${totalChars.toLocaleString()} chars`));
+        console.log();
+    }
+
+    // Workflow settings
+    console.log(chalk.bold('  Workflow Settings'));
+    console.log(chalk.gray(`    Human approval: ${auto ? 'off (--auto)' : config.workflow.humanApproval ? 'on' : 'off'}`));
+    console.log(chalk.gray(`    Auto-run tests: ${config.workflow.autoRunTests}`));
+    console.log(chalk.gray(`    Auto-commit: ${config.workflow.autoCommit}`));
+    console.log(chalk.gray(`    Auto-create branch: ${config.workflow.autoCreateBranch}`));
+    if (config.workflow.testCommand) {
+        console.log(chalk.gray(`    Test command: ${config.workflow.testCommand}`));
+    }
+    console.log();
+
+    // Project settings
+    console.log(chalk.bold('  Project'));
+    console.log(chalk.gray(`    Language: ${config.project.language}`));
+    console.log(chalk.gray(`    Framework: ${config.project.framework}`));
+    console.log(chalk.gray(`    Test framework: ${config.project.testFramework}`));
+    console.log();
+
+    logger.info('Dry run complete. No agents were called and no files were modified.');
 }
 
 // ── Private helpers ──

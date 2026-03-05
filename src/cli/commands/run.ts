@@ -23,7 +23,8 @@ export const runCommand = new Command('run')
     .option('--stop-on-failure', 'Stop the queue on first failure (batch mode)')
     .option('--context <paths...>', 'Context files to load as reference documents')
     .option('--no-stream', 'Disable real-time streaming of agent output')
-    .action(async (task: string, options: { auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean }) => {
+    .option('--dry-run', 'Preview the workflow plan without executing agents')
+    .action(async (task: string, options: { auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean; dryRun?: boolean }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
@@ -54,6 +55,7 @@ export const runCommand = new Command('run')
                     mode: options.mode,
                     stopOnFailure: options.stopOnFailure,
                     contextPaths: options.context,
+                    dryRun: options.dryRun,
                 });
 
                 const failed = results.filter(t => t.status === 'failed').length;
@@ -69,6 +71,7 @@ export const runCommand = new Command('run')
                 mode: options.mode,
                 contextPaths: options.context,
                 streaming: options.stream,
+                dryRun: options.dryRun,
             });
 
             if (result.state === 'failed') {
