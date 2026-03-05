@@ -155,7 +155,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
             }
 
             // Save session after each step (crash recovery)
-            sessionId = saveSession(projectRoot, ctx, tokenTracker.getEntries() as any[], sessionId);
+            sessionId = saveSession(projectRoot, ctx, tokenTracker.getEntries(), sessionId);
 
             // Human approval gate (skipped in autonomous mode)
             const shouldApprove = !auto && needsApproval(config.workflow.humanApproval, ctx.state);
@@ -192,7 +192,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     }
 
     // Final save
-    saveSession(projectRoot, ctx, tokenTracker.getEntries() as any[], sessionId);
+    saveSession(projectRoot, ctx, tokenTracker.getEntries(), sessionId);
 
     // Print summaries
     printWorkflowSummary(ctx);
