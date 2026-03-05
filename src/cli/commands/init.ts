@@ -25,6 +25,7 @@ import { pickModel } from '../utils/model-picker.js';
 import { generateDefaultPrompts } from '../../prompts/library.js';
 import { ensureDir } from '../../utils/fs.js';
 import { detectPackageManager, buildTestCommand } from '../../utils/package-manager.js';
+import { detectProject } from '../../utils/project-detector.js';
 import { logger } from '../../utils/logger.js';
 
 export const initCommand = new Command('init')
@@ -95,36 +96,42 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     // ── Step 1: Project Detection ──
     logger.step(1, 6, 'Project Settings');
     const pm = detectPackageManager(projectRoot);
-    console.log(chalk.gray(`  Detected package manager: ${pm.name}`));
+    const detected = detectProject(projectRoot);
+
+    console.log(chalk.gray(`  Detected: ${detected.language} / ${detected.framework} / ${detected.testFramework} (${pm.name})`));
     console.log();
+
+    const languageChoices = [
+        { title: 'TypeScript', value: 'typescript' },
+        { title: 'JavaScript', value: 'javascript' },
+        { title: 'Python', value: 'python' },
+        { title: 'Go', value: 'go' },
+        { title: 'Rust', value: 'rust' },
+        { title: 'Java', value: 'java' },
+        { title: 'Ruby', value: 'ruby' },
+        { title: 'Other', value: 'other' },
+    ];
+    const detectedLangIndex = languageChoices.findIndex(c => c.value === detected.language);
+
     const projectAnswers = await prompts([
         {
             type: 'select',
             name: 'language',
             message: 'Primary programming language:',
-            choices: [
-                { title: 'TypeScript', value: 'typescript' },
-                { title: 'JavaScript', value: 'javascript' },
-                { title: 'Python', value: 'python' },
-                { title: 'Go', value: 'go' },
-                { title: 'Rust', value: 'rust' },
-                { title: 'Java', value: 'java' },
-                { title: 'Other', value: 'other' },
-            ],
-            initial: 0,
+            choices: languageChoices,
+            initial: detectedLangIndex >= 0 ? detectedLangIndex : 0,
         },
         {
             type: 'text',
             name: 'framework',
             message: 'Framework (or "none"):',
-            initial: 'none',
+            initial: detected.framework,
         },
         {
             type: 'text',
             name: 'testFramework',
             message: 'Test framework:',
-            initial: (_prev: unknown, answers: { language?: string }) =>
-                getDefaultTestFramework(answers.language ?? 'typescript'),
+            initial: detected.testFramework,
         },
     ]);
 
@@ -494,16 +501,4 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     return config;
 }
 
-/** Get the default test framework based on the selected language. */
-function getDefaultTestFramework(language: string): string {
-    const defaults: Record<string, string> = {
-        typescript: 'vitest',
-        javascript: 'vitest',
-        python: 'pytest',
-        go: 'go test',
-        rust: 'cargo test',
-        java: 'junit',
-    };
-    return defaults[language] ?? 'npm test';
-}
 
