@@ -19,6 +19,7 @@ import type {
     TokenUsage,
 } from './types.js';
 import { logger } from '../utils/logger.js';
+import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
 
 /** Configuration required to create an Anthropic provider. */
 export interface AnthropicProviderConfig {
@@ -118,19 +119,11 @@ export class AnthropicProvider implements LLMProvider {
             body.temperature = options.temperature;
         }
 
-        const response = await fetch(`${this.baseUrl}/v1/messages`, {
-            method: 'POST',
-            headers: this.getHeaders(),
-            body: JSON.stringify(body),
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new ProviderError(
-                `Anthropic streaming request failed: ${response.status} ${response.statusText}`,
-                { status: response.status, body: errorBody, provider: 'anthropic' },
-            );
-        }
+        const response = await fetchWithRetry(
+            `${this.baseUrl}/v1/messages`,
+            { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(body) },
+            { provider: 'anthropic', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
 
         if (!response.body) {
             throw new ProviderError('Anthropic response has no body', { provider: 'anthropic' });
@@ -223,28 +216,11 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     private async request(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-        let response: Response;
-
-        try {
-            response = await fetch(`${this.baseUrl}${path}`, {
-                method: 'POST',
-                headers: this.getHeaders(),
-                body: JSON.stringify(body),
-            });
-        } catch (err) {
-            throw new ProviderError(
-                `Failed to connect to Anthropic API: ${err instanceof Error ? err.message : String(err)}`,
-                { provider: 'anthropic', baseUrl: this.baseUrl },
-            );
-        }
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new ProviderError(
-                `Anthropic API error: ${response.status} ${response.statusText}`,
-                { status: response.status, body: errorBody, provider: 'anthropic' },
-            );
-        }
+        const response = await fetchWithRetry(
+            `${this.baseUrl}${path}`,
+            { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(body) },
+            { provider: 'anthropic', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
 
         return response.json() as Promise<Record<string, unknown>>;
     }
