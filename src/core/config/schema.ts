@@ -99,6 +99,8 @@ export const projectConfigSchema = z.object({
  * Schema for workflow execution settings.
  */
 export const workflowConfigSchema = z.object({
+    /** Workflow mode preset: fast, balanced, or strict. */
+    mode: z.enum(['fast', 'balanced', 'strict']).default('balanced'),
     /** Maximum number of fix iterations before stopping. */
     maxIterations: z.number().int().min(1).max(20).default(5),
     /** Whether to require human approval between stages. */
