@@ -19,10 +19,11 @@ export const runCommand = new Command('run')
     .argument('<task>', 'Task description or path to a task list file (.txt)')
     .option('--auto', 'Autonomous mode — skip all human approval gates')
     .option('--batch', 'Treat the argument as a task list file (one task per line)')
+    .option('--mode <mode>', 'Workflow mode override: fast, balanced, or strict')
     .option('--stop-on-failure', 'Stop the queue on first failure (batch mode)')
     .option('--context <paths...>', 'Context files to load as reference documents')
     .option('--no-stream', 'Disable real-time streaming of agent output')
-    .action(async (task: string, options: { auto?: boolean; batch?: boolean; stopOnFailure?: boolean; context?: string[]; stream: boolean }) => {
+    .action(async (task: string, options: { auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
@@ -50,6 +51,7 @@ export const runCommand = new Command('run')
                     projectRoot,
                     tasks,
                     auto: options.auto,
+                    mode: options.mode,
                     stopOnFailure: options.stopOnFailure,
                     contextPaths: options.context,
                 });
@@ -64,6 +66,7 @@ export const runCommand = new Command('run')
                 projectRoot,
                 task,
                 auto: options.auto,
+                mode: options.mode,
                 contextPaths: options.context,
                 streaming: options.stream,
             });
