@@ -147,6 +147,15 @@ export abstract class BaseAgent {
 
             callbacks?.onComplete?.(accumulated);
 
+            // If the stream completed but yielded no content, fall back to
+            // non-streaming. This catches compound models that emit intermediate
+            // tool-call events with no text, or silent API errors that return
+            // HTTP 200 with an empty body.
+            if (!accumulated) {
+                logger.warn(`${label} streaming returned empty content — retrying without streaming`);
+                return this.execute(input);
+            }
+
             // Estimate token count: ~4 chars per token
             // TODO: use per-provider tokenizer for accuracy
             const estimatedTokens = Math.ceil(accumulated.length / 4);

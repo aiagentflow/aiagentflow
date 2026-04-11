@@ -150,10 +150,10 @@ export class GroqProvider implements LLMProvider {
                         if (delta?.content) {
                             yield { content: delta.content, done: false };
                         }
-                        if (event.choices?.[0]?.finish_reason) {
-                            yield { content: '', done: true };
-                            return;
-                        }
+                        // Do NOT exit on finish_reason — compound models (compound-beta,
+                        // compound-beta-mini) emit intermediate chunks with finish_reason
+                        // set during internal tool-call steps before the final text
+                        // response arrives. Let [DONE] be the only termination signal.
                     } catch {
                         // Skip unparseable lines
                     }
