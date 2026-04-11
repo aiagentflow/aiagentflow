@@ -20,7 +20,10 @@ jobs:
 
       - name: Create tag and GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use a PAT (RELEASE_PAT secret) so the release event triggers
+          # publish.yml. GITHUB_TOKEN-created events do not trigger downstream
+          # workflows (GitHub security restriction).
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
           git tag "v$VERSION"
