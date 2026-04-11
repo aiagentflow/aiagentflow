@@ -203,6 +203,24 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         };
     }
 
+    if (selectedProviders.includes('groq')) {
+        const groqAnswers = await prompts([
+            {
+                type: 'password',
+                name: 'apiKey',
+                message: 'Groq API key:',
+                validate: (val: string) => val.length >= 8 || 'API key seems too short',
+            },
+        ]);
+
+        if (!groqAnswers.apiKey) return null;
+
+        config.providers.groq = {
+            apiKey: groqAnswers.apiKey,
+            baseUrl: 'https://api.groq.com/openai/v1',
+        };
+    }
+
     if (selectedProviders.includes('gemini')) {
         const geminiAnswers = await prompts([
             {
@@ -293,6 +311,7 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         } else if (assignmentMode === 'smart') {
             // Reasoning roles → cloud (anthropic), generation roles → local (ollama)
             const cloudProvider = selectedProviders.includes('anthropic') ? 'anthropic'
+                : selectedProviders.includes('groq') ? 'groq'
                 : selectedProviders.includes('openai') ? 'openai'
                 : selectedProviders.includes('gemini') ? 'gemini'
                 : selectedProviders[0]!;

@@ -15,7 +15,7 @@ import { z } from 'zod';
  */
 export const agentRoleConfigSchema = z.object({
     /** Which provider to use for this agent role. */
-    provider: z.enum(['anthropic', 'gemini', 'ollama', 'openai']),
+    provider: z.enum(['anthropic', 'gemini', 'groq', 'ollama', 'openai']),
     /** The model identifier to use. */
     model: z.string().min(1),
     /** Sampling temperature (0.0 = deterministic, higher = more creative). */
@@ -61,6 +61,14 @@ export const geminiProviderSchema = z.object({
 });
 
 /**
+ * Schema for Groq provider settings.
+ */
+export const groqProviderSchema = z.object({
+    apiKey: z.string().min(1, 'Groq API key is required'),
+    baseUrl: z.string().url().default('https://api.groq.com/openai/v1'),
+});
+
+/**
  * Schema for OpenAI provider settings.
  */
 export const openaiProviderSchema = z.object({
@@ -75,6 +83,7 @@ export const openaiProviderSchema = z.object({
 export const providerConfigSchema = z.object({
     anthropic: anthropicProviderSchema.optional(),
     gemini: geminiProviderSchema.optional(),
+    groq: groqProviderSchema.optional(),
     ollama: ollamaProviderSchema.optional(),
     openai: openaiProviderSchema.optional(),
 });

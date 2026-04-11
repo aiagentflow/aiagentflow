@@ -15,6 +15,7 @@ import type { LLMProviderName } from './types.js';
 export const PROVIDER_LABELS: Record<LLMProviderName, string> = {
     anthropic: 'Anthropic (Claude)',
     gemini: 'Google Gemini',
+    groq: 'Groq',
     ollama: 'Ollama (Local)',
     openai: 'OpenAI (GPT)',
 };
@@ -23,6 +24,7 @@ export const PROVIDER_LABELS: Record<LLMProviderName, string> = {
 export const PROVIDER_DEFAULT_MODELS: Record<LLMProviderName, string> = {
     anthropic: 'claude-sonnet-4-20250514',
     gemini: 'gemini-2.0-flash',
+    groq: 'llama-3.3-70b-versatile',
     ollama: 'llama3.2:latest',
     openai: 'gpt-4o-mini',
 };
@@ -31,6 +33,7 @@ export const PROVIDER_DEFAULT_MODELS: Record<LLMProviderName, string> = {
 export const PROVIDER_DESCRIPTIONS: Record<LLMProviderName, string> = {
     anthropic: 'Anthropic (Claude) — requires API key',
     gemini: 'Google Gemini — requires API key',
+    groq: 'Groq — fast OpenAI-compatible inference, requires API key',
     ollama: 'Ollama (Local Models) — free, no API key needed',
     openai: 'OpenAI (GPT) — requires API key',
 };
