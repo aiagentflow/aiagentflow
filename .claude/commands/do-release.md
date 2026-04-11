@@ -1,5 +1,5 @@
 ---
-name: release
+name: do-release
 description: Cut a new release of @aiagentflow/cli. Triggers the GitHub Actions release pipeline — bumps version, opens bump PR, then tags and publishes to npm after merge.
 ---
 
@@ -12,6 +12,7 @@ Run this skill whenever you want to cut a new version. It will walk through ever
 If the user did not pass an argument, ask:
 
 > What kind of release is this?
+>
 > - `patch` — bug fixes only (0.9.0 → 0.9.1)
 > - `minor` — new features, backward-compatible (0.9.0 → 0.10.0)
 > - `major` — breaking changes (0.9.0 → 1.0.0)
@@ -57,12 +58,14 @@ gh run watch <run-id>
 ```
 
 The workflow will:
+
 - Run `typecheck`, `build`, `test` in CI
 - Bump version in `package.json` and `src/cli/index.ts`
 - Push branch `chore/bump-vX.Y.Z`
 - Open a PR automatically (requires "Allow GitHub Actions to create and approve pull requests" enabled in repo Settings → Actions → General)
 
 If the workflow fails at "Push branch and open PR" with `createPullRequest` permission error:
+
 - The branch was still pushed — create the PR manually:
   ```bash
   gh pr create --title "Bump version to X.Y.Z" \
@@ -126,9 +129,9 @@ Tell the user:
 
 ## Known gotchas
 
-| Problem | Cause | Fix |
-|---------|-------|-----|
-| `createPullRequest` error in workflow | Repo setting not enabled | Settings → Actions → General → enable "Allow GitHub Actions to create and approve pull requests" |
-| `tag-on-merge` skips tag creation | Merge commit message doesn't contain `chore/bump-v` | Check that the bump branch was named `chore/bump-vX.Y.Z` |
-| Orphaned tag pointing to wrong commit | Cancelled/failed push to main | `git push origin --delete refs/tags/vX.Y.Z` then re-run |
-| Release workflow bumps wrong version | Triggered twice or on wrong base | Cancel duplicate with `gh run cancel <id>` before it commits |
+| Problem                               | Cause                                               | Fix                                                                                              |
+| ------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `createPullRequest` error in workflow | Repo setting not enabled                            | Settings → Actions → General → enable "Allow GitHub Actions to create and approve pull requests" |
+| `tag-on-merge` skips tag creation     | Merge commit message doesn't contain `chore/bump-v` | Check that the bump branch was named `chore/bump-vX.Y.Z`                                         |
+| Orphaned tag pointing to wrong commit | Cancelled/failed push to main                       | `git push origin --delete refs/tags/vX.Y.Z` then re-run                                          |
+| Release workflow bumps wrong version  | Triggered twice or on wrong base                    | Cancel duplicate with `gh run cancel <id>` before it commits                                     |
