@@ -1,7 +1,7 @@
 name: Tag and Release on Version Bump
 
-# Step 2 of 2: when a "Bump version to X.Y.Z" commit lands on main,
-# create the git tag and GitHub Release — which triggers publish.yml → npm publish.
+# Step 2 of 2: fires when a bump PR (chore/bump-vX.Y.Z) merges into main.
+# Creates the git tag and GitHub Release, which triggers publish.yml → npm publish.
 
 on:
   push:
@@ -9,30 +9,20 @@ on:
 
 jobs:
   tag-and-release:
+    # Merge commits from bump branches look like:
+    # "Merge pull request #N from org/chore/bump-vX.Y.Z"
+    if: contains(github.event.head_commit.message, 'chore/bump-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check if this is a version bump commit
-        id: check
-        run: |
-          MSG=$(git log -1 --pretty=%s)
-          if echo "$MSG" | grep -qE '^Bump version to [0-9]+\.[0-9]+\.[0-9]+$'; then
-            VERSION=$(node -p "require('./package.json').version")
-            echo "is_bump=true" >> $GITHUB_OUTPUT
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-          else
-            echo "is_bump=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create tag and GitHub Release
-        if: steps.check.outputs.is_bump == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ steps.check.outputs.version }}"
+          VERSION=$(node -p "require('./package.json').version")
           git tag "v$VERSION"
           git push origin "v$VERSION"
           gh release create "v$VERSION" \
