@@ -1,5 +1,8 @@
 name: Release
 
+# Step 1 of 2: bump version on a branch and open a PR.
+# Step 2 is handled by tag-on-merge.yml — it tags + releases when this PR lands on main.
+
 on:
   workflow_dispatch:
     inputs:
@@ -14,14 +17,13 @@ on:
           - major
 
 jobs:
-  release:
+  bump:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -54,17 +56,17 @@ jobs:
         run: |
           sed -i "s/\.version('${{ steps.bump.outputs.old }}')/\.version('${{ steps.bump.outputs.new }}')/" src/cli/index.ts
 
-      - name: Commit and tag
-        run: |
-          git add package.json package-lock.json src/cli/index.ts
-          git commit -m "Bump version to ${{ steps.bump.outputs.new }}"
-          git tag "v${{ steps.bump.outputs.new }}"
-          git push origin main --tags
-
-      - name: Create GitHub Release
+      - name: Push branch and open PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "v${{ steps.bump.outputs.new }}" \
-            --title "v${{ steps.bump.outputs.new }}" \
-            --generate-notes
+          BRANCH="chore/bump-v${{ steps.bump.outputs.new }}"
+          git checkout -b "$BRANCH"
+          git add package.json package-lock.json src/cli/index.ts
+          git commit -m "Bump version to ${{ steps.bump.outputs.new }}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "Bump version to ${{ steps.bump.outputs.new }}" \
+            --body "Automated version bump from \`${{ steps.bump.outputs.old }}\` to \`${{ steps.bump.outputs.new }}\`. Merging this PR will trigger tag creation and npm publish." \
+            --base main \
+            --head "$BRANCH"
