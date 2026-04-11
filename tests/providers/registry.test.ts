@@ -20,9 +20,10 @@ describe('getSupportedProviders', () => {
         const providers = getSupportedProviders();
         expect(providers).toContain('anthropic');
         expect(providers).toContain('gemini');
+        expect(providers).toContain('groq');
         expect(providers).toContain('ollama');
         expect(providers).toContain('openai');
-        expect(providers.length).toBe(4);
+        expect(providers.length).toBe(5);
     });
 });
 
@@ -49,10 +50,28 @@ describe('createProvider', () => {
         expect(provider.name).toBe('anthropic');
     });
 
+    it('creates a Groq provider with valid config', () => {
+        const config: ProviderConfig = {
+            groq: {
+                apiKey: 'gsk_test_12345678',
+                baseUrl: 'https://api.groq.com/openai/v1',
+            },
+        };
+
+        const provider = createProvider('groq', config);
+        expect(provider.name).toBe('groq');
+    });
+
     it('throws ProviderError when Anthropic config is missing', () => {
         const config: ProviderConfig = {};
 
         expect(() => createProvider('anthropic', config)).toThrow(ProviderError);
+    });
+
+    it('throws ProviderError when Groq config is missing', () => {
+        const config: ProviderConfig = {};
+
+        expect(() => createProvider('groq', config)).toThrow(ProviderError);
     });
 
     it('caches provider instances', () => {
@@ -78,6 +97,6 @@ describe('createProvider', () => {
 
     it('throws for unknown provider name', () => {
         const config: ProviderConfig = {};
-        expect(() => createProvider('openai' as any, config)).toThrow(ProviderError);
+        expect(() => createProvider('bogus' as any, config)).toThrow(ProviderError);
     });
 });

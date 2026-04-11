@@ -5,7 +5,7 @@
  * handling so each provider doesn't duplicate this logic.
  *
  * Dependency direction: provider-errors.ts → core/errors.ts, utils/logger.ts
- * Used by: anthropic.ts, openai.ts, gemini.ts, ollama.ts
+ * Used by: anthropic.ts, openai.ts, gemini.ts, groq.ts, ollama.ts
  */
 
 import { ProviderError } from '../core/errors.js';

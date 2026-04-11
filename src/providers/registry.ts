@@ -6,14 +6,15 @@
  * 2. Register it in the PROVIDER_FACTORIES map below
  * 3. Add the name to LLMProviderName type in types.ts
  *
- * Dependency direction: registry.ts → types.ts, anthropic.ts, ollama.ts, errors.ts
+ * Dependency direction: registry.ts → types.ts, provider adapters, errors.ts
  * Used by: workflow engine, CLI doctor command
  */
 
 import type { LLMProvider, LLMProviderName } from './types.js';
 import { AnthropicProvider, type AnthropicProviderConfig } from './anthropic.js';
-import { OllamaProvider, type OllamaProviderConfig } from './ollama.js';
 import { GeminiProvider, type GeminiProviderConfig } from './gemini.js';
+import { GroqProvider, type GroqProviderConfig } from './groq.js';
+import { OllamaProvider, type OllamaProviderConfig } from './ollama.js';
 import { OpenAIProvider, type OpenAIProviderConfig } from './openai.js';
 import type { ProviderConfig } from '../core/config/types.js';
 import { ProviderError } from '../core/errors.js';
@@ -46,6 +47,17 @@ const PROVIDER_FACTORIES: Record<LLMProviderName, (config: ProviderConfig) => LL
         return new GeminiProvider(geminiConfig as GeminiProviderConfig);
     },
 
+    groq: (config: ProviderConfig) => {
+        const groqConfig = config.groq;
+        if (!groqConfig) {
+            throw new ProviderError(
+                'Groq provider is not configured. Run "aiagentflow init" to set up.',
+                { provider: 'groq' },
+            );
+        }
+        return new GroqProvider(groqConfig as GroqProviderConfig);
+    },
+
     ollama: (config: ProviderConfig) => {
         const ollamaConfig = config.ollama;
         return new OllamaProvider(ollamaConfig as OllamaProviderConfig | undefined);
@@ -69,7 +81,7 @@ const providerCache = new Map<LLMProviderName, LLMProvider>();
 /**
  * Create (or return cached) a provider instance by name.
  *
- * @param name - The provider name ('anthropic' | 'ollama')
+ * @param name - The provider name
  * @param config - The providers section of the app config
  * @returns An LLMProvider instance
  * @throws {ProviderError} if the provider name is unknown or config is missing

@@ -53,6 +53,14 @@ describe('agentRoleConfigSchema', () => {
         expect(result.success).toBe(true);
     });
 
+    it('accepts groq as a valid provider', () => {
+        const result = agentRoleConfigSchema.safeParse({
+            provider: 'groq',
+            model: 'openai/gpt-oss-20b',
+        });
+        expect(result.success).toBe(true);
+    });
+
     it('rejects empty model string', () => {
         const result = agentRoleConfigSchema.safeParse({
             provider: 'anthropic',
@@ -101,6 +109,16 @@ describe('providerConfigSchema', () => {
         expect(result.success).toBe(true);
         if (result.success) {
             expect(result.data.gemini?.baseUrl).toBe('https://generativelanguage.googleapis.com');
+        }
+    });
+
+    it('accepts groq config with required fields', () => {
+        const result = providerConfigSchema.safeParse({
+            groq: { apiKey: 'gsk_test_12345678' },
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.data.groq?.baseUrl).toBe('https://api.groq.com/openai/v1');
         }
     });
 

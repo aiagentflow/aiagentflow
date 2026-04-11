@@ -57,7 +57,7 @@ aiagentflow run --batch tasks.txt --auto
 
 The `init` wizard walks you through:
 1. Auto-detect your project (language, framework, test framework, package manager)
-2. Select your LLM providers (Anthropic, OpenAI, Gemini, Ollama)
+2. Select your LLM providers (Anthropic, OpenAI, Groq, Gemini, Ollama)
 3. Enter API keys
 4. Assign models per agent role
 5. Choose a workflow mode (fast, balanced, strict)
@@ -73,7 +73,7 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 - **Context-aware** — feed specs, PRDs, architecture docs, and guidelines to every agent
 - **Plan from docs** — generate batch-ready task lists from your existing documentation
 - **Local-first** — runs entirely on your machine, no code leaves your system
-- **Provider-agnostic** — Anthropic (Claude), OpenAI (GPT), Google Gemini, Ollama (local/free)
+- **Provider-agnostic** — Anthropic (Claude), OpenAI (GPT), Groq, Google Gemini, Ollama (local/free)
 - **Workflow modes** — fast, balanced, or strict presets for iterations, approval, and temperatures
 - **Smart detection** — auto-detects language, framework, test runner, and package manager
 - **Configurable** — tune models, temperature, and iteration limits per agent
@@ -122,6 +122,7 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 |----------|------|---------------|-------|
 | **Anthropic** | Cloud API | `claude-sonnet-4-20250514` | Requires API key |
 | **OpenAI** | Cloud API | `gpt-4o-mini` | Requires API key |
+| **Groq** | Cloud API | `llama-3.3-70b-versatile` | Requires API key |
 | **Google Gemini** | Cloud API | `gemini-2.0-flash` | Requires API key |
 | **Ollama** | Local | `llama3.2:latest` | Requires [Ollama](https://ollama.com) running locally |
 
@@ -224,7 +225,7 @@ aiagentflow run --batch tasks.txt --auto --context docs/architecture.md
 src/
 ├── cli/            # CLI entry point and commands
 ├── core/           # Config system, workflow engine, QA policies
-├── providers/      # LLM provider adapters (Anthropic, OpenAI, Gemini, Ollama)
+├── providers/      # LLM provider adapters (Anthropic, OpenAI, Groq, Gemini, Ollama)
 ├── agents/         # Agent implementations and prompt library
 ├── git/            # Git operations wrapper
 ├── prompts/        # Default prompt templates
@@ -285,7 +286,7 @@ Contributions are welcome! Here's how to get started:
 - [x] QA policies, token tracking, session persistence
 - [x] Context documents — feed specs, PRDs, and guidelines to agents
 - [x] Plan command — generate task lists from documentation
-- [x] Multiple providers — Anthropic, OpenAI, Gemini, Ollama
+- [x] Multiple providers — Anthropic, OpenAI, Groq, Gemini, Ollama
 - [x] Project auto-detection — language, framework, test runner, package manager
 - [x] Auto-commit on QA pass
 - [x] Workflow mode presets — fast, balanced, strict
