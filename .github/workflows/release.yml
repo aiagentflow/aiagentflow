@@ -64,6 +64,9 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="chore/bump-v${{ steps.bump.outputs.new }}"
+          # Delete stale remote branch if it exists (e.g. from a previously
+          # closed bump PR) so the push below never gets rejected.
+          git push origin --delete "$BRANCH" 2>/dev/null || true
           git checkout -b "$BRANCH"
           git add package.json package-lock.json src/cli/index.ts
           git commit -m "Bump version to ${{ steps.bump.outputs.new }}"
