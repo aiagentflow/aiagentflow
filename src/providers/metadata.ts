@@ -18,6 +18,7 @@ export const PROVIDER_LABELS: Record<LLMProviderName, string> = {
     groq: 'Groq',
     ollama: 'Ollama (Local)',
     openai: 'OpenAI (GPT)',
+    openrouter: 'OpenRouter',
 };
 
 /** Default model ID to use when the user does not specify one. */
@@ -27,6 +28,7 @@ export const PROVIDER_DEFAULT_MODELS: Record<LLMProviderName, string> = {
     groq: 'llama-3.3-70b-versatile',
     ollama: 'llama3.2:latest',
     openai: 'gpt-4o-mini',
+    openrouter: 'meta-llama/llama-3.1-8b-instruct:free',
 };
 
 /** Short description shown as the choice text in the init wizard's provider selector. */
@@ -36,4 +38,5 @@ export const PROVIDER_DESCRIPTIONS: Record<LLMProviderName, string> = {
     groq: 'Groq — fast OpenAI-compatible inference, requires API key',
     ollama: 'Ollama (Local Models) — free, no API key needed',
     openai: 'OpenAI (GPT) — requires API key',
+    openrouter: 'OpenRouter — access 100+ models, free tier available, requires API key',
 };

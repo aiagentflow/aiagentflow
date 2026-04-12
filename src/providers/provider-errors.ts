@@ -137,7 +137,7 @@ export async function fetchWithRetry(
     init: RequestInit,
     options: FetchRetryOptions,
 ): Promise<Response> {
-    const { provider, baseUrl, timeoutMs, maxRetries = 2 } = options;
+    const { provider, baseUrl, timeoutMs, maxRetries = 3 } = options;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
@@ -203,11 +203,17 @@ function getRetryDelay(response: Response, attempt: number): number {
     const retryAfter = response.headers.get('retry-after');
     if (retryAfter) {
         const seconds = Number(retryAfter);
-        if (!Number.isNaN(seconds) && seconds > 0 && seconds <= 60) {
+        if (!Number.isNaN(seconds) && seconds > 0 && seconds <= 120) {
             return seconds * 1000;
         }
     }
-    // Exponential backoff: 1s, 2s, 4s
+    // For 429 rate limits use a longer backoff — free-tier providers (Groq,
+    // OpenRouter) enforce per-minute windows that a 1–4s wait won't clear.
+    // Exponential backoff: 10s, 20s, 40s
+    if (response.status === 429) {
+        return 10_000 * 2 ** attempt;
+    }
+    // Exponential backoff for server errors: 1s, 2s, 4s
     return 1000 * 2 ** attempt;
 }
 
