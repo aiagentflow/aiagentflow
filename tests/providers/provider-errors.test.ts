@@ -175,11 +175,16 @@ describe('fetchWithRetry', () => {
             .mockResolvedValueOnce(retryResponse)
             .mockResolvedValueOnce(okResponse);
 
-        const result = await fetchWithRetry(
-            'https://api.example.com/test',
-            { method: 'POST' },
-            { provider: 'test', baseUrl: 'https://api.example.com', timeoutMs: 5000, maxRetries: 2 },
-        );
+        // 429 backoff starts at 10s — advance fake timers past it so the test
+        // doesn't wait 10 real seconds and hit the default timeout.
+        const [result] = await Promise.all([
+            fetchWithRetry(
+                'https://api.example.com/test',
+                { method: 'POST' },
+                { provider: 'test', baseUrl: 'https://api.example.com', timeoutMs: 5000, maxRetries: 2 },
+            ),
+            vi.advanceTimersByTimeAsync(15_000),
+        ]);
 
         expect(result.status).toBe(200);
         expect(globalThis.fetch).toHaveBeenCalledTimes(2);
@@ -206,13 +211,17 @@ describe('fetchWithRetry', () => {
         const retryResponse = new Response('rate limited', { status: 429 });
         globalThis.fetch = vi.fn().mockResolvedValue(retryResponse);
 
-        await expect(
-            fetchWithRetry(
-                'https://api.example.com/test',
-                { method: 'POST' },
-                { provider: 'openai', baseUrl: 'https://api.openai.com', timeoutMs: 5000, maxRetries: 1 },
-            ),
-        ).rejects.toThrow(ProviderError);
+        // Advance past the 10s 429 backoff (maxRetries: 1 → 1 retry → 1 sleep of 10s).
+        await Promise.all([
+            expect(
+                fetchWithRetry(
+                    'https://api.example.com/test',
+                    { method: 'POST' },
+                    { provider: 'openai', baseUrl: 'https://api.openai.com', timeoutMs: 5000, maxRetries: 1 },
+                ),
+            ).rejects.toThrow(ProviderError),
+            vi.advanceTimersByTimeAsync(15_000),
+        ]);
 
         expect(globalThis.fetch).toHaveBeenCalledTimes(2); // initial + 1 retry
     });

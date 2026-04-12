@@ -16,6 +16,7 @@ import { GeminiProvider, type GeminiProviderConfig } from './gemini.js';
 import { GroqProvider, type GroqProviderConfig } from './groq.js';
 import { OllamaProvider, type OllamaProviderConfig } from './ollama.js';
 import { OpenAIProvider, type OpenAIProviderConfig } from './openai.js';
+import { OpenRouterProvider, type OpenRouterProviderConfig } from './openrouter.js';
 import type { ProviderConfig } from '../core/config/types.js';
 import { ProviderError } from '../core/errors.js';
 import { logger } from '../utils/logger.js';
@@ -72,6 +73,17 @@ const PROVIDER_FACTORIES: Record<LLMProviderName, (config: ProviderConfig) => LL
             );
         }
         return new OpenAIProvider(openaiConfig as OpenAIProviderConfig);
+    },
+
+    openrouter: (config: ProviderConfig) => {
+        const openrouterConfig = config.openrouter;
+        if (!openrouterConfig) {
+            throw new ProviderError(
+                'OpenRouter provider is not configured. Run "aiagentflow init" to set up.',
+                { provider: 'openrouter' },
+            );
+        }
+        return new OpenRouterProvider(openrouterConfig as OpenRouterProviderConfig);
     },
 };
 

@@ -15,7 +15,7 @@ import { z } from 'zod';
  */
 export const agentRoleConfigSchema = z.object({
     /** Which provider to use for this agent role. */
-    provider: z.enum(['anthropic', 'gemini', 'groq', 'ollama', 'openai']),
+    provider: z.enum(['anthropic', 'gemini', 'groq', 'ollama', 'openai', 'openrouter']),
     /** The model identifier to use. */
     model: z.string().min(1),
     /** Sampling temperature (0.0 = deterministic, higher = more creative). */
@@ -80,12 +80,23 @@ export const openaiProviderSchema = z.object({
 /**
  * Schema for provider configuration (all providers).
  */
+/**
+ * Schema for OpenRouter provider settings.
+ */
+export const openrouterProviderSchema = z.object({
+    apiKey: z.string().min(1, 'OpenRouter API key is required'),
+    baseUrl: z.string().url().default('https://openrouter.ai/api/v1'),
+    siteUrl: z.string().optional(),
+    siteName: z.string().optional(),
+});
+
 export const providerConfigSchema = z.object({
     anthropic: anthropicProviderSchema.optional(),
     gemini: geminiProviderSchema.optional(),
     groq: groqProviderSchema.optional(),
     ollama: ollamaProviderSchema.optional(),
     openai: openaiProviderSchema.optional(),
+    openrouter: openrouterProviderSchema.optional(),
 });
 
 /**

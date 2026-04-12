@@ -23,7 +23,8 @@ describe('getSupportedProviders', () => {
         expect(providers).toContain('groq');
         expect(providers).toContain('ollama');
         expect(providers).toContain('openai');
-        expect(providers.length).toBe(5);
+        expect(providers).toContain('openrouter');
+        expect(providers.length).toBe(6);
     });
 });
 
