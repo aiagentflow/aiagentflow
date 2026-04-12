@@ -58,7 +58,10 @@ jobs:
 
       - name: Push branch and open PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use RELEASE_PAT so the PR creation fires the pull_request event
+          # and triggers CI. GITHUB_TOKEN-created events are blocked from
+          # triggering downstream workflows (GitHub security restriction).
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="chore/bump-v${{ steps.bump.outputs.new }}"
           git checkout -b "$BRANCH"
