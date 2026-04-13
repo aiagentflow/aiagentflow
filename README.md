@@ -57,7 +57,7 @@ aiagentflow run --batch tasks.txt --auto
 
 The `init` wizard walks you through:
 1. Auto-detect your project (language, framework, test framework, package manager)
-2. Select your LLM providers (Anthropic, OpenAI, Groq, Gemini, Ollama)
+2. Select your LLM providers (Anthropic, OpenAI, Groq, Gemini, OpenRouter, Ollama)
 3. Enter API keys
 4. Assign models per agent role
 5. Choose a workflow mode (fast, balanced, strict)
@@ -73,7 +73,7 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 - **Context-aware** — feed specs, PRDs, architecture docs, and guidelines to every agent
 - **Plan from docs** — generate batch-ready task lists from your existing documentation
 - **Local-first** — runs entirely on your machine, no code leaves your system
-- **Provider-agnostic** — Anthropic (Claude), OpenAI (GPT), Groq, Google Gemini, Ollama (local/free)
+- **Provider-agnostic** — Anthropic, OpenAI, Groq, Google Gemini, OpenRouter (100+ models), Ollama (local/free)
 - **Workflow modes** — fast, balanced, or strict presets for iterations, approval, and temperatures
 - **Smart detection** — auto-detects language, framework, test runner, and package manager
 - **Configurable** — tune models, temperature, and iteration limits per agent
@@ -96,10 +96,13 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 | `aiagentflow doctor` | Health check — verify providers and setup |
 | `aiagentflow run <task>` | Run a workflow for a task |
 | `aiagentflow run <task> --auto` | Autonomous mode (no approval prompts) |
+| `aiagentflow run <task> --dry-run` | Preview the plan without executing |
 | `aiagentflow run <task> --context <files...>` | Run with reference documents |
 | `aiagentflow run --batch tasks.txt` | Process multiple tasks from a file |
 | `aiagentflow plan <docs...>` | Generate a task list from documentation |
 | `aiagentflow plan <docs...> -o tasks.txt` | Write task list to file (batch-ready) |
+| `aiagentflow resume` | Resume the last interrupted session |
+| `aiagentflow sessions` | List all saved sessions |
 
 ---
 
@@ -122,8 +125,9 @@ Configuration is saved locally in `.aiagentflow/config.json`.
 |----------|------|---------------|-------|
 | **Anthropic** | Cloud API | `claude-sonnet-4-20250514` | Requires API key |
 | **OpenAI** | Cloud API | `gpt-4o-mini` | Requires API key |
-| **Groq** | Cloud API | `llama-3.3-70b-versatile` | Requires API key |
+| **Groq** | Cloud API | `llama-3.3-70b-versatile` | Requires API key (generous free tier) |
 | **Google Gemini** | Cloud API | `gemini-2.0-flash` | Requires API key |
+| **OpenRouter** | Cloud API | `meta-llama/llama-3.1-8b-instruct:free` | Requires API key (100+ models, many free) |
 | **Ollama** | Local | `llama3.2:latest` | Requires [Ollama](https://ollama.com) running locally |
 
 You can mix providers — use cloud APIs for reasoning agents (architect, reviewer, judge) and local models for generation agents (coder, tester, fixer).
@@ -225,7 +229,7 @@ aiagentflow run --batch tasks.txt --auto --context docs/architecture.md
 src/
 ├── cli/            # CLI entry point and commands
 ├── core/           # Config system, workflow engine, QA policies
-├── providers/      # LLM provider adapters (Anthropic, OpenAI, Groq, Gemini, Ollama)
+├── providers/      # LLM provider adapters (Anthropic, OpenAI, Groq, Gemini, OpenRouter, Ollama)
 ├── agents/         # Agent implementations and prompt library
 ├── git/            # Git operations wrapper
 ├── prompts/        # Default prompt templates
