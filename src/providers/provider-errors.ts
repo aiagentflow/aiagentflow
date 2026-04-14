@@ -25,6 +25,11 @@ export function getHttpErrorHint(status: number, provider: string): string {
     if (status === 404) {
         return 'Check the base URL in your configuration or verify the model name exists';
     }
+    if (status === 413) {
+        return `Payload too large — the prompt sent to ${provider} exceeded its request size limit. ` +
+            `If you are using a compound model (compound-beta, compound-beta-mini), switch the coder/fixer/reviewer agents ` +
+            `to a standard model such as llama-3.3-70b-versatile in .aiagentflow/config.json`;
+    }
     if (status === 429) {
         return 'Rate limited — wait a moment and retry, or check your plan\'s rate limits';
     }
