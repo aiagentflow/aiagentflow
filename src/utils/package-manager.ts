@@ -8,7 +8,7 @@
  * Used by: cli/commands/init.ts, core/workflow/runner.ts
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export type PackageManager = 'bun' | 'pnpm' | 'yarn' | 'npm';
@@ -59,6 +59,37 @@ const JS_TEST_TOOLS: Record<string, string> = {
     'vitest': 'vitest run',
     'jest': 'jest',
 };
+
+/**
+ * Detect a script command from package.json by checking known script names.
+ *
+ * Looks up the project's package.json `scripts` field and returns the
+ * package-manager-prefixed command for the first matching script name found.
+ * Returns an empty string if no match is found.
+ *
+ * @param projectRoot - Root directory of the project
+ * @param scriptNames - Script names to look for, in priority order (e.g. ['lint', 'eslint'])
+ */
+export function detectScriptCommand(projectRoot: string, scriptNames: string[]): string {
+    const pkgPath = join(projectRoot, 'package.json');
+    if (!existsSync(pkgPath)) return '';
+
+    try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { scripts?: Record<string, string> };
+        const scripts = pkg.scripts ?? {};
+        const pm = detectPackageManager(projectRoot);
+
+        for (const name of scriptNames) {
+            if (scripts[name]) {
+                return `${pm.name} run ${name}`;
+            }
+        }
+    } catch {
+        // Ignore malformed package.json
+    }
+
+    return '';
+}
 
 /**
  * Build a test command by prefixing JS/TS test tools with the correct

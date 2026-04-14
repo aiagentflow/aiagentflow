@@ -27,6 +27,7 @@ import { createAgent } from '../../agents/factory.js';
 import { GitClient } from '../../git/client.js';
 import { parseAndWriteFiles } from './file-parser.js';
 import { runTests } from './test-runner.js';
+import { runLint, runFormat } from './lint-runner.js';
 import { requestApproval, needsApproval } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
 import { saveSession, loadSession, listSessions } from './session.js';
@@ -408,6 +409,12 @@ function printDryRun(
     if (config.workflow.testCommand) {
         console.log(chalk.gray(`    Test command: ${config.workflow.testCommand}`));
     }
+    if (config.workflow.lintCommand) {
+        console.log(chalk.gray(`    Lint command: ${config.workflow.lintCommand}`));
+    }
+    if (config.workflow.formatCommand) {
+        console.log(chalk.gray(`    Format command: ${config.workflow.formatCommand}`));
+    }
     console.log();
 
     // Project settings
@@ -531,6 +538,24 @@ async function applyAgentOutput(
 
         case 'coder': {
             const files = parseAndWriteFiles(projectRoot, content);
+
+            // Format silently, then lint as a gate
+            if (config.workflow.formatCommand) {
+                await runFormat(projectRoot, config.workflow.formatCommand);
+            }
+            if (config.workflow.lintCommand) {
+                const lintResult = await runLint(projectRoot, config.workflow.lintCommand);
+                if (!lintResult.passed) {
+                    if (isRepeatedFailure(lintResult.output, ctx.previousFailures)) {
+                        logger.warn('Repeated lint failure — fixer could not resolve lint errors. Continuing.');
+                    } else {
+                        ctx.previousFailures.push(lintResult.output);
+                        ctx = transition(ctx, { type: 'CODE_GENERATED', payload: { files: files.length > 0 ? files : ['(no files parsed)'] } });
+                        return transition(ctx, { type: 'TESTS_FAILED', payload: { failures: `Lint errors:\n${lintResult.output}` } });
+                    }
+                }
+            }
+
             return transition(ctx, {
                 type: 'CODE_GENERATED',
                 payload: { files: files.length > 0 ? files : ['(no files parsed)'] },
@@ -587,6 +612,12 @@ async function applyAgentOutput(
 
         case 'fixer': {
             const fixedFiles = parseAndWriteFiles(projectRoot, content);
+
+            // Re-format after fixes
+            if (config.workflow.formatCommand) {
+                await runFormat(projectRoot, config.workflow.formatCommand);
+            }
+
             ctx = transition(ctx, {
                 type: 'FIX_APPLIED',
                 payload: { files: fixedFiles.length > 0 ? fixedFiles : ['(no files parsed)'] },
