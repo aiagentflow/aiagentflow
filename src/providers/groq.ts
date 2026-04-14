@@ -27,6 +27,13 @@ export interface GroqProviderConfig {
     readonly baseUrl?: string;
 }
 
+/**
+ * Groq compound models use internal tool-calling which inflates request
+ * payload size significantly. Agents that receive large upstream context
+ * (coder, fixer, reviewer) will hit 413 Payload Too Large.
+ */
+const COMPOUND_MODELS = new Set(['compound-beta', 'compound-beta-mini', 'groq/compound-mini', 'groq/compound-beta']);
+
 /** Default Groq API settings. */
 const DEFAULTS = {
     baseUrl: 'https://api.groq.com/openai/v1',
@@ -76,6 +83,12 @@ export class GroqProvider implements LLMProvider {
             body.stop = options.stopSequences;
         }
 
+        if (COMPOUND_MODELS.has(model)) {
+            logger.warn(
+                `Groq compound model "${model}" may cause 413 errors when used with coder/fixer/reviewer agents ` +
+                `due to large prompt payloads. Consider switching those agents to llama-3.3-70b-versatile.`,
+            );
+        }
         logger.debug(`Groq chat request: model=${model}, messages=${apiMessages.length}`);
 
         const response = await this.request('/chat/completions', body);
@@ -111,6 +124,13 @@ export class GroqProvider implements LLMProvider {
         }
         if (options?.temperature !== undefined) {
             body.temperature = options.temperature;
+        }
+
+        if (COMPOUND_MODELS.has(model)) {
+            logger.warn(
+                `Groq compound model "${model}" may cause 413 errors when used with coder/fixer/reviewer agents ` +
+                `due to large prompt payloads. Consider switching those agents to llama-3.3-70b-versatile.`,
+            );
         }
 
         const response = await fetchWithRetry(
