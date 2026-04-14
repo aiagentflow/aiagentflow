@@ -24,7 +24,7 @@ import { PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, PROVIDER_DESCRIPTIONS } from 
 import { pickModel } from '../utils/model-picker.js';
 import { generateDefaultPrompts } from '../../prompts/library.js';
 import { ensureDir } from '../../utils/fs.js';
-import { detectPackageManager, buildTestCommand } from '../../utils/package-manager.js';
+import { detectPackageManager, buildTestCommand, detectScriptCommand } from '../../utils/package-manager.js';
 import { detectProject } from '../../utils/project-detector.js';
 import { logger } from '../../utils/logger.js';
 
@@ -508,6 +508,28 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
     });
     if (testCommand && testCommand !== defaultTestCmd) {
         config.workflow.testCommand = testCommand;
+    }
+
+    const detectedLint = detectScriptCommand(projectRoot, ['lint', 'eslint']);
+    const { lintCommand } = await prompts({
+        type: 'text',
+        name: 'lintCommand',
+        message: 'Lint command (leave blank to skip):',
+        initial: detectedLint,
+    });
+    if (lintCommand) {
+        config.workflow.lintCommand = lintCommand;
+    }
+
+    const detectedFormat = detectScriptCommand(projectRoot, ['format', 'fmt', 'prettier']);
+    const { formatCommand } = await prompts({
+        type: 'text',
+        name: 'formatCommand',
+        message: 'Format command (leave blank to skip):',
+        initial: detectedFormat,
+    });
+    if (formatCommand) {
+        config.workflow.formatCommand = formatCommand;
     }
 
     // ── Step 6: Context Documents ──
