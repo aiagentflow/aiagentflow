@@ -13,6 +13,8 @@ jobs:
     # "Merge pull request #N from org/chore/bump-vX.Y.Z"
     if: contains(github.event.head_commit.message, 'chore/bump-v')
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       contents: write
     steps:
