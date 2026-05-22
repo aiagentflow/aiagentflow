@@ -31,6 +31,7 @@ export const agentConfigSchema = z.object({
     architect: agentRoleConfigSchema,
     coder: agentRoleConfigSchema,
     reviewer: agentRoleConfigSchema,
+    security: agentRoleConfigSchema.default({ provider: 'ollama', model: 'llama3.2:latest', temperature: 0.2, maxTokens: 4096 }),
     tester: agentRoleConfigSchema,
     fixer: agentRoleConfigSchema,
     judge: agentRoleConfigSchema,
