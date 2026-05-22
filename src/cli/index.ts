@@ -15,6 +15,8 @@ import { runCommand } from './commands/run.js';
 import { planCommand } from './commands/plan.js';
 import { resumeCommand } from './commands/resume.js';
 import { sessionsCommand } from './commands/sessions.js';
+import { chatCommand } from './commands/chat.js';
+import { exportCommand } from './commands/export.js';
 
 const program = new Command();
 
@@ -31,5 +33,7 @@ program.addCommand(runCommand);
 program.addCommand(planCommand);
 program.addCommand(resumeCommand);
 program.addCommand(sessionsCommand);
+program.addCommand(chatCommand);
+program.addCommand(exportCommand);
 
 program.parse();
