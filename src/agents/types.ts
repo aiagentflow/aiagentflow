@@ -6,13 +6,14 @@
  */
 
 /** All supported agent roles in the workflow. */
-export type AgentRole = 'architect' | 'coder' | 'reviewer' | 'tester' | 'fixer' | 'judge';
+export type AgentRole = 'architect' | 'coder' | 'reviewer' | 'security' | 'tester' | 'fixer' | 'judge';
 
 /** Display-friendly labels for each agent role. */
 export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
     architect: '🧠 Architect',
     coder: '💻 Coder',
     reviewer: '🔍 Reviewer',
+    security: '🔒 Security',
     tester: '🧪 Tester',
     fixer: '🐛 Fixer',
     judge: '✅ Judge',
@@ -31,6 +32,7 @@ export const ALL_AGENT_ROLES: readonly AgentRole[] = [
     'architect',
     'coder',
     'reviewer',
+    'security',
     'tester',
     'fixer',
     'judge',

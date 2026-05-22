@@ -15,6 +15,7 @@ import { createProvider } from '../providers/registry.js';
 import { ArchitectAgent } from './roles/architect.js';
 import { CoderAgent } from './roles/coder.js';
 import { ReviewerAgent } from './roles/reviewer.js';
+import { SecurityAgent } from './roles/security.js';
 import { TesterAgent } from './roles/tester.js';
 import { FixerAgent } from './roles/fixer.js';
 import { JudgeAgent } from './roles/judge.js';
@@ -48,6 +49,8 @@ export function createAgent(
             return new CoderAgent(provider, options, projectRoot);
         case 'reviewer':
             return new ReviewerAgent(provider, options, projectRoot);
+        case 'security':
+            return new SecurityAgent(provider, options, projectRoot);
         case 'tester':
             return new TesterAgent(provider, options, projectRoot);
         case 'fixer':

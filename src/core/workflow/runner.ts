@@ -236,9 +236,9 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
             if (!agentRole) {
                 if (ctx.state === 'qa_approved') {
                     logger.success('Workflow complete!');
-                    break;
+                } else {
+                    logger.warn('No agent mapped to current state — stopping.');
                 }
-                logger.warn('No agent mapped to current state — stopping.');
                 break;
             }
 
@@ -353,7 +353,8 @@ function printDryRun(
         { state: 'idle', role: 'architect', description: 'Analyze task and create implementation plan' },
         { state: 'plan_approved', role: 'coder', description: 'Generate code from the plan' },
         { state: 'code_generated', role: 'reviewer', description: 'Review generated code' },
-        { state: 'review_done', role: 'tester', description: 'Write and run tests' },
+        { state: 'review_done', role: 'security', description: 'Scan for security vulnerabilities' },
+        { state: 'security_checked', role: 'tester', description: 'Write and run tests' },
         { state: 'tests_passed', role: 'judge', description: 'Final QA verdict' },
     ];
 
@@ -454,8 +455,9 @@ function applyModePreset(config: AppConfig, mode: string): void {
     config.workflow.autoCommit = preset.autoCommit;
 
     for (const [role, temp] of Object.entries(preset.temperatures)) {
-        if (config.agents[role as keyof typeof config.agents]) {
-            config.agents[role as keyof typeof config.agents].temperature = temp;
+        const agentCfg = config.agents[role as keyof typeof config.agents];
+        if (agentCfg) {
+            agentCfg.temperature = temp;
         }
     }
 }
@@ -495,6 +497,7 @@ function buildAgentContext(
     if (ctx.spec) parts.push(`## Spec\n${ctx.spec}`);
     if (ctx.plan) parts.push(`## Plan\n${ctx.plan}`);
     if (ctx.reviewFeedback) parts.push(`## Review Feedback\n${ctx.reviewFeedback}`);
+    if (ctx.securityFindings) parts.push(`## Security Findings\n${ctx.securityFindings}`);
     if (ctx.testFailures) parts.push(`## Test Failures\n${ctx.testFailures}`);
     if (ctx.generatedFiles.length > 0) {
         parts.push(`## Modified Files\n${ctx.generatedFiles.join('\n')}`);
@@ -578,6 +581,15 @@ async function applyAgentOutput(
             // QA policy only blocks when the reviewer did NOT approve.
             const approved = reviewApproved;
             return transition(ctx, { type: 'REVIEW_DONE', payload: { approved, feedback: content } });
+        }
+
+        case 'security': {
+            const upper = content.toUpperCase();
+            const passed = upper.includes('PASS') && !upper.includes('FAIL');
+            if (!passed) {
+                logger.warn('Security review found issues — routing to Fixer.');
+            }
+            return transition(ctx, { type: 'SECURITY_CHECKED', payload: { passed, findings: content } });
         }
 
         case 'tester': {

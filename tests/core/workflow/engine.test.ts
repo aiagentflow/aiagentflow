@@ -55,6 +55,10 @@ describe('transition', () => {
         ctx = transition(ctx, { type: 'REVIEW_DONE', payload: { approved: true, feedback: 'LGTM' } });
         expect(ctx.state).toBe('review_done');
 
+        ctx = transition(ctx, { type: 'SECURITY_CHECKED', payload: { passed: true, findings: 'No issues' } });
+        expect(ctx.state).toBe('security_checked');
+        expect(ctx.securityFindings).toBe('No issues');
+
         ctx = transition(ctx, { type: 'TESTS_WRITTEN', payload: { testFiles: ['app.test.ts'] } });
         expect(ctx.state).toBe('tests_written');
 
