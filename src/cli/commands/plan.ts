@@ -12,6 +12,7 @@
 import { Command } from 'commander';
 import { existsSync, writeFileSync } from 'node:fs';
 import ora from 'ora';
+import chalk from 'chalk';
 import { configExists, loadConfig } from '../../core/config/manager.js';
 import { loadContextDocuments, formatContextForAgent } from '../../core/workflow/context-loader.js';
 import { createAgent } from '../../agents/factory.js';
@@ -22,7 +23,9 @@ export const planCommand = new Command('plan')
     .argument('<docs...>', 'Documentation files to analyze (PRDs, specs, etc.)')
     .option('-o, --output <file>', 'Write task list to file (default: stdout)')
     .option('--context <paths...>', 'Additional context files to include')
-    .action(async (docs: string[], options: { output?: string; context?: string[] }) => {
+    .option('--numbered', 'Prefix each task with a number')
+    .option('--no-stream', 'Disable streaming output')
+    .action(async (docs: string[], options: { output?: string; context?: string[]; numbered?: boolean; stream: boolean }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
@@ -55,28 +58,42 @@ export const planCommand = new Command('plan')
             const agent = createAgent('architect', config, projectRoot);
             const spinner = ora('Generating task breakdown...').start();
 
-            const output = await agent.execute({
-                task: 'Break down the following reference documents into an ordered list of implementation tasks. Output one task per line, no numbers, no bullets, no commentary.',
-                context: formattedContext,
-            });
+            const PLAN_TASK = 'Break down the following reference documents into an ordered list of implementation tasks. Output one task per line, no numbers, no bullets, no extra commentary.';
 
-            spinner.succeed(`Task breakdown complete (${output.tokensUsed} tokens)`);
+            let rawContent: string;
 
-            // Clean up output — filter empty lines
-            const taskLines = output.content
+            if (options.stream) {
+                spinner.stop();
+                console.log(chalk.bold('  Generating task breakdown...\n'));
+                const chunks: string[] = [];
+                await agent.executeStreaming(
+                    { task: PLAN_TASK, context: formattedContext },
+                    { onChunk: (chunk) => { chunks.push(chunk); process.stdout.write(chunk); } },
+                );
+                console.log();
+                rawContent = chunks.join('');
+            } else {
+                const output = await agent.execute({ task: PLAN_TASK, context: formattedContext });
+                spinner.succeed(`Task breakdown complete (${output.tokensUsed} tokens)`);
+                rawContent = output.content;
+            }
+
+            // Strip leading numbers/bullets that the LLM might include despite instructions
+            const taskLines = rawContent
                 .split('\n')
-                .map(line => line.trim())
-                .filter(line => line.length > 0)
-                .join('\n');
+                .map(line => line.trim().replace(/^(\d+[\.\)]\s*|[-*]\s*)/, ''))
+                .filter(line => line.length > 0);
+
+            const formatted = options.numbered
+                ? taskLines.map((line, i) => `${i + 1}. ${line}`).join('\n')
+                : taskLines.join('\n');
 
             if (options.output) {
-                writeFileSync(options.output, taskLines + '\n', 'utf-8');
+                writeFileSync(options.output, formatted + '\n', 'utf-8');
                 logger.success(`Task list written to ${options.output}`);
-
-                const count = taskLines.split('\n').length;
-                logger.info(`${count} task(s) generated. Run with: aiagentflow run --batch ${options.output} --auto`);
-            } else {
-                console.log(taskLines);
+                logger.info(`${taskLines.length} task(s) generated. Run with: aiagentflow run --batch ${options.output} --auto`);
+            } else if (!options.stream) {
+                console.log(formatted);
             }
         } catch (err) {
             logger.error(`Plan failed: ${err instanceof Error ? err.message : String(err)}`);
