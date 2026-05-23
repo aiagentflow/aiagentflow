@@ -22,6 +22,7 @@ import { discardCommand } from './commands/discard.js';
 import { gcCommand } from './commands/gc.js';
 import { mcpCommand } from './commands/mcp.js';
 import { pluginCommand } from './commands/plugin.js';
+import { uiCommand } from './commands/ui.js';
 
 const program = new Command();
 
@@ -45,5 +46,6 @@ program.addCommand(discardCommand);
 program.addCommand(gcCommand);
 program.addCommand(mcpCommand);
 program.addCommand(pluginCommand);
+program.addCommand(uiCommand);
 
 program.parse();
