@@ -8,7 +8,7 @@
  * Used by: all agent implementations
  */
 
-import type { LLMProvider, ChatMessage, ChatOptions, ChatResponse } from '../providers/types.js';
+import type { LLMProvider, ChatMessage, ChatOptions, ChatResponse, ToolDefinition, ToolCall, ToolResult } from '../providers/types.js';
 import type { AgentRole, StreamCallbacks } from './types.js';
 import { ProviderError } from '../core/errors.js';
 import { logger } from '../utils/logger.js';
@@ -53,17 +53,27 @@ export abstract class BaseAgent {
     protected readonly model: string;
     protected readonly temperature: number;
     protected readonly maxTokens: number;
+    protected readonly tools: readonly ToolDefinition[];
+    protected readonly onToolCall?: (call: ToolCall) => Promise<ToolResult>;
 
     constructor(
         role: AgentRole,
         provider: LLMProvider,
-        options: { model: string; temperature?: number; maxTokens?: number },
+        options: {
+            model: string;
+            temperature?: number;
+            maxTokens?: number;
+            tools?: ToolDefinition[];
+            onToolCall?: (call: ToolCall) => Promise<ToolResult>;
+        },
     ) {
         this.role = role;
         this.provider = provider;
         this.model = options.model;
         this.temperature = options.temperature ?? 0.7;
         this.maxTokens = options.maxTokens ?? 4096;
+        this.tools = options.tools ?? [];
+        this.onToolCall = options.onToolCall;
     }
 
     /**
@@ -89,6 +99,7 @@ export abstract class BaseAgent {
             temperature: this.temperature,
             maxTokens: this.maxTokens,
             systemPrompt,
+            ...(this.tools.length > 0 ? { tools: this.tools, onToolCall: this.onToolCall } : {}),
         };
 
         try {
