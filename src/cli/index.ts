@@ -21,6 +21,7 @@ import { runsCommand } from './commands/runs.js';
 import { discardCommand } from './commands/discard.js';
 import { gcCommand } from './commands/gc.js';
 import { mcpCommand } from './commands/mcp.js';
+import { pluginCommand } from './commands/plugin.js';
 
 const program = new Command();
 
@@ -43,5 +44,6 @@ program.addCommand(runsCommand);
 program.addCommand(discardCommand);
 program.addCommand(gcCommand);
 program.addCommand(mcpCommand);
+program.addCommand(pluginCommand);
 
 program.parse();
