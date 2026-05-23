@@ -158,6 +158,19 @@ export async function pruneStaleWorktrees(
     return pruned;
 }
 
+/**
+ * Check whether a worktree directory still exists and is registered with git.
+ */
+export async function worktreeExists(projectRoot: string, worktreePath: string): Promise<boolean> {
+    if (!existsSync(worktreePath)) return false;
+    try {
+        const { stdout } = await execa('git', ['worktree', 'list', '--porcelain'], { cwd: projectRoot });
+        return stdout.includes(`worktree ${worktreePath}`);
+    } catch {
+        return false;
+    }
+}
+
 // ── Helpers ──
 
 async function getCurrentBranch(projectRoot: string): Promise<string> {

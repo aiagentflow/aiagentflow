@@ -26,7 +26,7 @@ import type { AgentRole } from '../../agents/types.js';
 import { AGENT_ROLE_LABELS } from '../../agents/types.js';
 import { createAgent } from '../../agents/factory.js';
 import { GitClient } from '../../git/client.js';
-import { createWorktree, mergeBranch, type WorktreeInfo } from '../../git/worktree.js';
+import { createWorktree, mergeBranch, worktreeExists, type WorktreeInfo } from '../../git/worktree.js';
 import { parseAndWriteFiles } from './file-parser.js';
 import { runTests } from './test-runner.js';
 import { runLint, runFormat } from './lint-runner.js';
@@ -62,6 +62,8 @@ export interface RunOptions {
     isolation?: 'worktree' | 'inplace';
     /** Agent roles that require plan-review approval. Overrides config.workflow.approvalGates. */
     approvalGates?: string[];
+    /** Print the per-agent token/cost summary at the end (default: true). */
+    showSummary?: boolean;
 }
 
 export interface ResumeOptions {
@@ -84,7 +86,7 @@ export interface ResumeOptions {
  * Returns the final workflow context with all accumulated data.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task, auto = false, mode, contextPaths, streaming = true, dryRun = false } = options;
+    const { projectRoot, task, auto = false, mode, contextPaths, streaming = true, dryRun = false, showSummary = true } = options;
     const config = loadConfig(projectRoot);
     const isolationMode = options.isolation ?? config.workflow.isolation;
 
@@ -158,6 +160,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         auto,
         streaming,
         worktree,
+        showSummary,
     });
 }
 
@@ -203,10 +206,66 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
     const contextDocs = loadContextDocuments(projectRoot);
     const sourceDocs = loadSourceFiles(projectRoot, config.project.sourceGlobs);
 
+    // Restore worktree if the session ran in one
+    let effectiveRoot = projectRoot;
+    let worktree: WorktreeInfo | undefined;
+
+    if (session.worktreePath && session.worktreeBranch) {
+        const exists = await worktreeExists(projectRoot, session.worktreePath);
+
+        if (exists) {
+            effectiveRoot = session.worktreePath;
+            worktree = {
+                path: session.worktreePath,
+                branch: session.worktreeBranch,
+                baseBranch: await resolveBaseBranch(projectRoot, session.worktreeBranch),
+                cleanup: () => import('../../git/worktree.js').then(m =>
+                    m.removeWorktree(projectRoot, session.worktreePath!, session.worktreeBranch!),
+                ),
+            };
+            logger.info(`Restored worktree: ${session.worktreePath} (branch: ${session.worktreeBranch})`);
+        } else {
+            // Worktree was discarded — ask what to do
+            const { action } = await prompts({
+                type: 'select',
+                name: 'action',
+                message: `Worktree for this session no longer exists. How would you like to continue?`,
+                choices: [
+                    { title: 'Recreate worktree from branch', value: 'recreate' },
+                    { title: 'Continue in-place (current directory)', value: 'inplace' },
+                    { title: 'Abort', value: 'abort' },
+                ],
+            });
+
+            if (!action || action === 'abort') {
+                throw new WorkflowError('Resume aborted — worktree no longer exists.');
+            }
+
+            if (action === 'recreate') {
+                try {
+                    worktree = await createWorktree({
+                        projectRoot,
+                        branchPrefix: config.workflow.branchPrefix,
+                        task: session.context.task,
+                        baseRef: session.worktreeBranch,
+                    });
+                    effectiveRoot = worktree.path;
+                    logger.info(`Recreated worktree at: ${worktree.path}`);
+                } catch (err) {
+                    logger.warn(`Could not recreate worktree: ${err instanceof Error ? err.message : String(err)}. Continuing in-place.`);
+                }
+            }
+            // 'inplace' falls through with effectiveRoot = projectRoot
+        }
+    }
+
     logger.header('AI Workflow — Resuming Session');
     console.log(chalk.gray(`Session: ${sessionId}`));
     console.log(chalk.gray(`Task: ${session.context.task}`));
     console.log(chalk.gray(`Resuming from state: ${session.context.state}`));
+    if (worktree) {
+        console.log(chalk.gray(`Worktree: ${worktree.path}`));
+    }
     if (mode) {
         console.log(chalk.blue(`Mode: ${mode}`));
     }
@@ -218,7 +277,8 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
     return executeWorkflowLoop({
         ctx: session.context,
         sessionId,
-        projectRoot,
+        projectRoot: effectiveRoot,
+        sourceProjectRoot: projectRoot,
         config,
         tokenTracker,
         qaPolicy,
@@ -226,7 +286,20 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
         sourceDocs,
         auto,
         streaming,
+        worktree,
     });
+}
+
+async function resolveBaseBranch(projectRoot: string, branch: string): Promise<string> {
+    try {
+        const { execa } = await import('execa');
+        const { stdout } = await execa('git', ['merge-base', '--fork-point', 'HEAD', branch], { cwd: projectRoot });
+        if (stdout.trim()) {
+            const { stdout: name } = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: projectRoot });
+            return name.trim();
+        }
+    } catch { /* ignore */ }
+    return 'main';
 }
 
 // ── Workflow loop ──
@@ -247,6 +320,8 @@ interface WorkflowLoopParams {
     streaming: boolean;
     /** Worktree info if the run is isolated, undefined for inplace runs. */
     worktree?: WorktreeInfo;
+    /** Print token/cost summary at end of run (default: true). */
+    showSummary?: boolean;
 }
 
 /**
@@ -256,8 +331,9 @@ interface WorkflowLoopParams {
  * and applies post-loop logic (auto-commit, summaries).
  */
 async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<WorkflowContext> {
-    const { projectRoot, config, tokenTracker, qaPolicy, contextDocs, sourceDocs, auto, streaming, worktree } = params;
+    const { projectRoot, config, tokenTracker, qaPolicy, contextDocs, sourceDocs, auto, streaming, worktree, showSummary = true } = params;
     const sessionRoot = params.sourceProjectRoot ?? projectRoot;
+    const startedAt = Date.now();
     let ctx = params.ctx;
     let sessionId = params.sessionId;
     let lastOutput = '';
@@ -385,7 +461,9 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
 
     // Print summaries
     printWorkflowSummary(ctx);
-    tokenTracker.printSummary();
+    if (showSummary) {
+        tokenTracker.printSummary(Date.now() - startedAt);
+    }
 
     return ctx;
 }

@@ -31,7 +31,8 @@ export const runCommand = new Command('run')
     .option('--parallel <n>', 'Run batch tasks N at a time in parallel worktrees (batch mode only)', parseInt)
     .option('--max-tokens <n>', 'Abort remaining tasks if total token budget is exceeded (batch mode)', parseInt)
     .option('--max-cost <usd>', 'Abort remaining tasks if estimated USD cost is exceeded (batch mode)', parseFloat)
-    .action(async (task: string, options: { auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean; dryRun?: boolean; isolate?: boolean; reviewPlan?: boolean; approvalGates?: string[]; parallel?: number; maxTokens?: number; maxCost?: number }) => {
+    .option('--no-summary', 'Suppress the token/cost summary at the end of the run')
+    .action(async (task: string, options: { auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean; dryRun?: boolean; isolate?: boolean; reviewPlan?: boolean; approvalGates?: string[]; parallel?: number; maxTokens?: number; maxCost?: number; summary: boolean }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
@@ -102,6 +103,7 @@ export const runCommand = new Command('run')
                 dryRun: options.dryRun,
                 isolation,
                 approvalGates,
+                showSummary: options.summary !== false,
             });
 
             if (result.state === 'failed') {
