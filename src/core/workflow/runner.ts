@@ -14,6 +14,7 @@
 
 import chalk from 'chalk';
 import ora from 'ora';
+import prompts from 'prompts';
 import {
     createWorkflowContext,
     transition,
@@ -25,10 +26,11 @@ import type { AgentRole } from '../../agents/types.js';
 import { AGENT_ROLE_LABELS } from '../../agents/types.js';
 import { createAgent } from '../../agents/factory.js';
 import { GitClient } from '../../git/client.js';
+import { createWorktree, mergeBranch, type WorktreeInfo } from '../../git/worktree.js';
 import { parseAndWriteFiles } from './file-parser.js';
 import { runTests } from './test-runner.js';
 import { runLint, runFormat } from './lint-runner.js';
-import { requestApproval, needsApproval } from './approval.js';
+import { requestApproval, needsApproval, requestPlanApproval, isApprovalGated } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
 import { saveSession, loadSession, listSessions } from './session.js';
 import { loadQAPolicy, evaluateReview, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
@@ -56,6 +58,10 @@ export interface RunOptions {
     streaming?: boolean;
     /** Preview workflow plan without executing agents. */
     dryRun?: boolean;
+    /** Override isolation mode from config. */
+    isolation?: 'worktree' | 'inplace';
+    /** Agent roles that require plan-review approval. Overrides config.workflow.approvalGates. */
+    approvalGates?: string[];
 }
 
 export interface ResumeOptions {
@@ -80,6 +86,12 @@ export interface ResumeOptions {
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
     const { projectRoot, task, auto = false, mode, contextPaths, streaming = true, dryRun = false } = options;
     const config = loadConfig(projectRoot);
+    const isolationMode = options.isolation ?? config.workflow.isolation;
+
+    // Merge CLI approval gates into config
+    if (options.approvalGates && options.approvalGates.length > 0) {
+        config.workflow.approvalGates = options.approvalGates as typeof config.workflow.approvalGates;
+    }
 
     // Apply mode preset override from --mode flag
     if (mode) {
@@ -107,15 +119,28 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     }
     console.log();
 
-    // Optional: create a Git branch for this task
-    if (config.workflow.autoCreateBranch) {
-        const git = new GitClient(projectRoot);
-        const isRepo = await git.isRepo();
+    // Worktree isolation: each task runs in its own git branch + directory
+    let worktree: WorktreeInfo | undefined;
+    let effectiveRoot = projectRoot;
 
-        if (isRepo) {
-            const branchName = GitClient.toBranchName(config.workflow.branchPrefix, task);
-            await git.createBranch(branchName);
+    const git = new GitClient(projectRoot);
+    const isRepo = await git.isRepo();
+
+    if (isolationMode === 'worktree' && isRepo) {
+        try {
+            worktree = await createWorktree({
+                projectRoot,
+                branchPrefix: config.workflow.branchPrefix,
+                task,
+            });
+            effectiveRoot = worktree.path;
+        } catch (err) {
+            logger.warn(`Worktree creation failed, falling back to inplace: ${err instanceof Error ? err.message : String(err)}`);
         }
+    } else if (config.workflow.autoCreateBranch && isRepo) {
+        // Legacy inplace branch creation
+        const branchName = GitClient.toBranchName(config.workflow.branchPrefix, task);
+        await git.createBranch(branchName);
     }
 
     // Create workflow context
@@ -123,7 +148,8 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
 
     return executeWorkflowLoop({
         ctx,
-        projectRoot,
+        projectRoot: effectiveRoot,
+        sourceProjectRoot: projectRoot,
         config,
         tokenTracker,
         qaPolicy,
@@ -131,6 +157,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         sourceDocs,
         auto,
         streaming,
+        worktree,
     });
 }
 
@@ -207,7 +234,10 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
 interface WorkflowLoopParams {
     ctx: WorkflowContext;
     sessionId?: string;
+    /** Effective project root — may be a worktree path. */
     projectRoot: string;
+    /** The original source project root (where sessions/config live). */
+    sourceProjectRoot?: string;
     config: AppConfig;
     tokenTracker: TokenTracker;
     qaPolicy: QAPolicy;
@@ -215,6 +245,8 @@ interface WorkflowLoopParams {
     sourceDocs: ContextDocument[];
     auto: boolean;
     streaming: boolean;
+    /** Worktree info if the run is isolated, undefined for inplace runs. */
+    worktree?: WorktreeInfo;
 }
 
 /**
@@ -224,10 +256,13 @@ interface WorkflowLoopParams {
  * and applies post-loop logic (auto-commit, summaries).
  */
 async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<WorkflowContext> {
-    const { projectRoot, config, tokenTracker, qaPolicy, contextDocs, sourceDocs, auto, streaming } = params;
+    const { projectRoot, config, tokenTracker, qaPolicy, contextDocs, sourceDocs, auto, streaming, worktree } = params;
+    const sessionRoot = params.sourceProjectRoot ?? projectRoot;
     let ctx = params.ctx;
     let sessionId = params.sessionId;
     let lastOutput = '';
+
+    const worktreeMeta = worktree ? { branch: worktree.branch, path: worktree.path } : undefined;
 
     try {
         while (!isTerminal(ctx)) {
@@ -272,6 +307,26 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
                     totalTokens: output.tokensUsed,
                 });
 
+                // Plan-review gate: pause after architect if configured
+                if (!auto && agentRole === 'architect' && isApprovalGated('architect', config.workflow.approvalGates)) {
+                    const planResult = await requestPlanApproval(output.content, ctx);
+
+                    if (planResult.action === 'abort') {
+                        ctx = transition(ctx, { type: 'ABORT', payload: { reason: 'User aborted after plan review' } });
+                        break;
+                    } else if (planResult.action === 'regenerate') {
+                        // Prepend feedback to next architect input — loop continues naturally
+                        logger.info(`Regenerating plan with feedback: "${planResult.feedback}"`);
+                        ctx = { ...ctx, task: `${ctx.task}\n\n[FEEDBACK]: ${planResult.feedback}` };
+                        continue;
+                    } else if (planResult.action === 'edit') {
+                        // Replace plan output with user-edited version
+                        output = { ...output, content: planResult.plan };
+                        lastOutput = planResult.plan;
+                    }
+                    // 'approve' falls through — apply as-is
+                }
+
                 // Transition based on agent output
                 ctx = await applyAgentOutput(ctx, agentRole, output.content, config, projectRoot, qaPolicy);
             } catch (err) {
@@ -284,7 +339,7 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
             }
 
             // Save session after each step (crash recovery)
-            sessionId = saveSession(projectRoot, ctx, tokenTracker.getEntries(), sessionId);
+            sessionId = saveSession(sessionRoot, ctx, tokenTracker.getEntries(), sessionId, worktreeMeta);
 
             // Human approval gate (skipped in autonomous mode)
             const shouldApprove = !auto && needsApproval(config.workflow.humanApproval, ctx.state);
@@ -320,14 +375,92 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
         }
     }
 
+    // Handle worktree merge / show merge instructions
+    if (worktree) {
+        await handleWorktreeFinish(worktree, ctx, sessionRoot, config, auto);
+    }
+
     // Final save
-    saveSession(projectRoot, ctx, tokenTracker.getEntries(), sessionId);
+    saveSession(sessionRoot, ctx, tokenTracker.getEntries(), sessionId, worktreeMeta);
 
     // Print summaries
     printWorkflowSummary(ctx);
     tokenTracker.printSummary();
 
     return ctx;
+}
+
+// ── Worktree merge ──
+
+/**
+ * After a worktree run finishes, either auto-merge or show merge instructions.
+ */
+async function handleWorktreeFinish(
+    worktree: WorktreeInfo,
+    ctx: WorkflowContext,
+    sourceProjectRoot: string,
+    config: AppConfig,
+    auto: boolean,
+): Promise<void> {
+    const passed = ctx.state === 'qa_approved';
+    const { branch, baseBranch } = worktree;
+
+    const shouldAutoMerge =
+        config.workflow.autoMerge === 'always' ||
+        (config.workflow.autoMerge === 'on-judge-pass' && passed);
+
+    if (auto && shouldAutoMerge && passed) {
+        try {
+            await mergeBranch(sourceProjectRoot, branch);
+            logger.success(`Merged ${branch} → ${baseBranch}`);
+            await worktree.cleanup();
+            return;
+        } catch (err) {
+            logger.warn(`Auto-merge failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    console.log();
+    console.log(chalk.bold.cyan('── Worktree Ready ──'));
+    console.log(chalk.gray(`Branch : ${branch}`));
+    console.log(chalk.gray(`Path   : ${worktree.path}`));
+    console.log(chalk.gray(`Base   : ${baseBranch}`));
+    console.log();
+    console.log(chalk.gray('Review the diff:'));
+    console.log(chalk.white(`  git diff ${baseBranch}...${branch}`));
+    console.log();
+
+    if (!auto) {
+        const { action } = await prompts({
+            type: 'select',
+            name: 'action',
+            message: 'What would you like to do with the worktree?',
+            choices: [
+                { title: chalk.green('Merge') + ` — merge ${branch} into ${baseBranch}`, value: 'merge' },
+                { title: chalk.yellow('Keep') + ' — leave the worktree for manual review', value: 'keep' },
+                { title: chalk.red('Discard') + ' — delete the worktree and branch', value: 'discard' },
+            ],
+        });
+
+        if (action === 'merge') {
+            try {
+                await mergeBranch(sourceProjectRoot, branch);
+                logger.success(`Merged ${branch} → ${baseBranch}`);
+                await worktree.cleanup();
+            } catch (err) {
+                logger.error(`Merge failed: ${err instanceof Error ? err.message : String(err)}`);
+                logger.info(`Run manually: git merge ${branch}`);
+            }
+        } else if (action === 'discard') {
+            await worktree.cleanup();
+            logger.info('Worktree discarded.');
+        } else {
+            logger.info(`Worktree kept at: ${worktree.path}`);
+            logger.info(`To merge later: aiagentflow discard --merge ${branch}`);
+        }
+    } else {
+        logger.info(`Worktree kept. Run: aiagentflow discard --merge ${branch}`);
+    }
 }
 
 // ── Dry-run ──

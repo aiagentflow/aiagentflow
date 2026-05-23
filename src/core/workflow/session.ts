@@ -30,6 +30,10 @@ export interface SessionData {
     context: WorkflowContext;
     /** Token usage entries. */
     tokenUsage: readonly TokenUsageEntry[];
+    /** Worktree branch name, if the task ran in an isolated worktree. */
+    worktreeBranch?: string;
+    /** Worktree absolute path, if the task ran in an isolated worktree. */
+    worktreePath?: string;
 }
 
 /**
@@ -60,6 +64,7 @@ export function saveSession(
     context: WorkflowContext,
     tokenUsage: readonly TokenUsageEntry[] = [],
     sessionId?: string,
+    worktreeMeta?: { branch: string; path: string },
 ): string {
     const sessionsDir = getSessionsDir(projectRoot);
     ensureDir(sessionsDir);
@@ -67,14 +72,16 @@ export function saveSession(
     const id = sessionId ?? generateSessionId(context.task);
     const sessionPath = join(sessionsDir, `${id}.json`);
 
+    const existing = existsSync(sessionPath) ? loadSession(projectRoot, id) : null;
+
     const data: SessionData = {
         id,
-        createdAt: existsSync(sessionPath)
-            ? loadSession(projectRoot, id)?.createdAt ?? Date.now()
-            : Date.now(),
+        createdAt: existing?.createdAt ?? Date.now(),
         updatedAt: Date.now(),
         context,
         tokenUsage,
+        ...(worktreeMeta ? { worktreeBranch: worktreeMeta.branch, worktreePath: worktreeMeta.path } : {}),
+        ...(existing?.worktreeBranch && !worktreeMeta ? { worktreeBranch: existing.worktreeBranch, worktreePath: existing.worktreePath } : {}),
     };
 
     writeJsonFile(sessionPath, data);

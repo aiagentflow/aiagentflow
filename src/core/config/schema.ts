@@ -126,10 +126,16 @@ export const workflowConfigSchema = z.object({
     maxIterations: z.number().int().min(1).max(20).default(5),
     /** Whether to require human approval between stages. */
     humanApproval: z.boolean().default(true),
+    /** Which agent stages require explicit human approval before proceeding. */
+    approvalGates: z.array(z.enum(['architect', 'coder', 'reviewer', 'security', 'tester', 'fixer', 'judge'])).default([]),
     /** Whether to auto-create a Git branch for each task. */
     autoCreateBranch: z.boolean().default(true),
     /** Branch name prefix for auto-created branches. */
     branchPrefix: z.string().default('aiagentflow/'),
+    /** Run each task in an isolated git worktree. 'inplace' mutates the working directory directly. */
+    isolation: z.enum(['worktree', 'inplace']).default('inplace'),
+    /** When to merge the worktree branch back into the source branch. */
+    autoMerge: z.enum(['never', 'on-judge-pass', 'always']).default('never'),
     /** Whether to auto-run tests after code generation. */
     autoRunTests: z.boolean().default(true),
     /** Custom test command override (e.g., 'go test ./...'). Derived from testFramework if not set. */
