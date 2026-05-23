@@ -17,6 +17,8 @@ import type {
     ChatChunk,
     ModelInfo,
     TokenUsage,
+    ToolDefinition,
+    ToolCall,
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
@@ -59,42 +61,106 @@ export class AnthropicProvider implements LLMProvider {
 
     /**
      * Send a non-streaming chat completion request.
+     * If tools are provided and the model calls one, executes it via onToolCall and loops.
      */
     async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
         const { systemPrompt, apiMessages } = this.prepareMessages(messages, options);
         const model = options?.model ?? DEFAULTS.model;
         const maxTokens = options?.maxTokens ?? DEFAULTS.maxTokens;
 
-        const body: Record<string, unknown> = {
+        // Mutable conversation for the tool-use loop
+        const conversationMessages: Array<Record<string, unknown>> = [...apiMessages];
+        let totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
+        for (let turn = 0; turn < 10; turn++) {
+            const body: Record<string, unknown> = {
+                model,
+                max_tokens: maxTokens,
+                messages: conversationMessages,
+            };
+
+            if (systemPrompt) body.system = systemPrompt;
+            if (options?.temperature !== undefined) body.temperature = options.temperature;
+            if (options?.stopSequences?.length) body.stop_sequences = options.stopSequences;
+            if (options?.tools?.length) body.tools = this.serializeTools(options.tools);
+
+            logger.debug(`Anthropic chat request: model=${model}, messages=${conversationMessages.length}`);
+
+            const response = await this.request('/v1/messages', body);
+            const usage = this.extractUsage(response);
+            totalUsage = {
+                promptTokens: totalUsage.promptTokens + usage.promptTokens,
+                completionTokens: totalUsage.completionTokens + usage.completionTokens,
+                totalTokens: totalUsage.totalTokens + usage.totalTokens,
+            };
+
+            const stopReason = response.stop_reason as string | undefined;
+
+            if (stopReason === 'tool_use' && options?.onToolCall) {
+                // Extract tool calls from the response content blocks
+                const contentBlocks = response.content as Array<Record<string, unknown>>;
+                const toolUseBlocks = contentBlocks.filter(b => b.type === 'tool_use');
+
+                if (toolUseBlocks.length === 0) break;
+
+                // Append assistant message with tool use blocks
+                conversationMessages.push({ role: 'assistant', content: contentBlocks });
+
+                // Execute all tool calls and collect results
+                const toolResults: Array<Record<string, unknown>> = [];
+                for (const block of toolUseBlocks) {
+                    const toolCall: ToolCall = {
+                        name: block.name as string,
+                        input: (block.input as Record<string, unknown>) ?? {},
+                        callId: block.id as string,
+                    };
+                    logger.debug(`Executing MCP tool: ${toolCall.name}`);
+
+                    const result = await options.onToolCall(toolCall);
+                    toolResults.push({
+                        type: 'tool_result',
+                        tool_use_id: result.callId,
+                        content: result.content,
+                        ...(result.isError ? { is_error: true } : {}),
+                    });
+                }
+
+                // Append user message with tool results
+                conversationMessages.push({ role: 'user', content: toolResults });
+                continue;
+            }
+
+            // Model produced final text — done
+            const content = this.extractContent(response);
+            return {
+                content,
+                model: (response.model as string | undefined) ?? model,
+                usage: totalUsage,
+                finishReason: stopReason ?? 'unknown',
+            };
+        }
+
+        // Exceeded max turns — return whatever text we have
+        const lastResponse = await this.request('/v1/messages', {
             model,
             max_tokens: maxTokens,
-            messages: apiMessages,
-        };
-
-        if (systemPrompt) {
-            body.system = systemPrompt;
-        }
-        if (options?.temperature !== undefined) {
-            body.temperature = options.temperature;
-        }
-        if (options?.stopSequences?.length) {
-            body.stop_sequences = options.stopSequences;
-        }
-
-        logger.debug(`Anthropic chat request: model=${model}, messages=${apiMessages.length}`);
-
-        const response = await this.request('/v1/messages', body);
-
-        // Extract text content from response
-        const content = this.extractContent(response);
-        const usage = this.extractUsage(response);
-
+            messages: conversationMessages,
+            ...(systemPrompt ? { system: systemPrompt } : {}),
+        });
         return {
-            content,
-            model: (response.model as string | undefined) ?? model,
-            usage,
-            finishReason: (response.stop_reason as string | undefined) ?? 'unknown',
+            content: this.extractContent(lastResponse),
+            model: (lastResponse.model as string | undefined) ?? model,
+            usage: totalUsage,
+            finishReason: 'max_tool_turns',
         };
+    }
+
+    private serializeTools(tools: readonly ToolDefinition[]): Array<Record<string, unknown>> {
+        return tools.map(t => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.inputSchema,
+        }));
     }
 
     /**

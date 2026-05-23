@@ -67,6 +67,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         autoCommit: false,
         autoCommitMessage: 'ai: {task}',
     },
+
+    mcpServers: {},
 };
 
 /** The directory name where config is stored inside a project. */

@@ -36,6 +36,7 @@ import { saveSession, loadSession, listSessions } from './session.js';
 import { loadQAPolicy, evaluateReview, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
 import { loadContextDocuments, formatContextForAgent, loadSourceFiles, formatSourcesForAgent, type ContextDocument } from './context-loader.js';
 import { loadConfig } from '../config/manager.js';
+import { McpRegistry } from '../../mcp/registry.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
 import { buildTestCommand } from '../../utils/package-manager.js';
@@ -105,6 +106,13 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     const contextDocs = loadContextDocuments(projectRoot, contextPaths);
     const sourceDocs = loadSourceFiles(projectRoot, config.project.sourceGlobs);
 
+    // Start MCP servers if configured
+    const mcpRegistry = new McpRegistry();
+    const mcpServerCount = Object.keys(config.mcpServers ?? {}).length;
+    if (mcpServerCount > 0) {
+        await mcpRegistry.start(config.mcpServers);
+    }
+
     // Dry-run: show execution plan and exit
     if (dryRun) {
         printDryRun(task, config, contextDocs, sourceDocs, auto);
@@ -161,6 +169,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         streaming,
         worktree,
         showSummary,
+        mcpRegistry: mcpRegistry.isActive ? mcpRegistry : undefined,
     });
 }
 
@@ -322,6 +331,8 @@ interface WorkflowLoopParams {
     worktree?: WorktreeInfo;
     /** Print token/cost summary at end of run (default: true). */
     showSummary?: boolean;
+    /** MCP registry to pass tools into agents (started externally). */
+    mcpRegistry?: McpRegistry;
 }
 
 /**
@@ -331,7 +342,7 @@ interface WorkflowLoopParams {
  * and applies post-loop logic (auto-commit, summaries).
  */
 async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<WorkflowContext> {
-    const { projectRoot, config, tokenTracker, qaPolicy, contextDocs, sourceDocs, auto, streaming, worktree, showSummary = true } = params;
+    const { projectRoot, config, tokenTracker, qaPolicy, contextDocs, sourceDocs, auto, streaming, worktree, showSummary = true, mcpRegistry } = params;
     const sessionRoot = params.sourceProjectRoot ?? projectRoot;
     const startedAt = Date.now();
     let ctx = params.ctx;
@@ -353,7 +364,9 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
                 break;
             }
 
-            const agent = createAgent(agentRole, config, projectRoot);
+            const mcpTools = mcpRegistry?.getTools(agentRole) ?? [];
+            const onToolCall = mcpRegistry ? (call: import('../../providers/types.js').ToolCall) => mcpRegistry.executeTool(call) : undefined;
+            const agent = createAgent(agentRole, config, projectRoot, { tools: mcpTools, onToolCall });
             const agentConfig = config.agents[agentRole];
             const spinner = ora(`Running ${agentRole} agent...`).start();
 
@@ -458,6 +471,9 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
 
     // Final save
     saveSession(sessionRoot, ctx, tokenTracker.getEntries(), sessionId, worktreeMeta);
+
+    // Tear down MCP servers
+    mcpRegistry?.stop();
 
     // Print summaries
     printWorkflowSummary(ctx);

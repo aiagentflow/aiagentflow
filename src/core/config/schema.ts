@@ -151,6 +151,20 @@ export const workflowConfigSchema = z.object({
 });
 
 /**
+ * Schema for a single MCP server entry.
+ */
+export const mcpServerConfigSchema = z.object({
+    /** Command to run the server (e.g. "npx", "python"). */
+    command: z.string().min(1),
+    /** Arguments passed to the command. */
+    args: z.array(z.string()).default([]),
+    /** Additional environment variables for the server process. */
+    env: z.record(z.string()).default({}),
+    /** Agent roles allowed to use this server's tools. Default: all roles. */
+    allowedRoles: z.array(z.string()).optional(),
+});
+
+/**
  * The complete application configuration schema.
  * This is the single source of truth for config structure.
  */
@@ -165,4 +179,6 @@ export const appConfigSchema = z.object({
     project: projectConfigSchema,
     /** Workflow execution settings. */
     workflow: workflowConfigSchema,
+    /** MCP server definitions (optional). Keys are logical server names. */
+    mcpServers: z.record(mcpServerConfigSchema).default({}),
 });

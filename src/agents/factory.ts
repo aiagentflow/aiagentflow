@@ -11,6 +11,7 @@
 import type { AgentRole } from './types.js';
 import type { BaseAgent } from './base.js';
 import type { AppConfig } from '../core/config/types.js';
+import type { ToolDefinition, ToolCall, ToolResult } from '../providers/types.js';
 import { createProvider } from '../providers/registry.js';
 import { ArchitectAgent } from './roles/architect.js';
 import { CoderAgent } from './roles/coder.js';
@@ -21,17 +22,24 @@ import { FixerAgent } from './roles/fixer.js';
 import { JudgeAgent } from './roles/judge.js';
 import { WorkflowError } from '../core/errors.js';
 
+export interface AgentFactoryOptions {
+    tools?: ToolDefinition[];
+    onToolCall?: (call: ToolCall) => Promise<ToolResult>;
+}
+
 /**
  * Create an agent instance for the specified role using the app config.
  *
  * @param role - Which agent to create
  * @param config - Full application config
  * @param projectRoot - Project root directory for prompt loading
+ * @param factoryOpts - Optional MCP tools to pass into the agent
  */
 export function createAgent(
     role: AgentRole,
     config: AppConfig,
     projectRoot: string,
+    factoryOpts?: AgentFactoryOptions,
 ): BaseAgent {
     const agentConfig = config.agents[role];
     const provider = createProvider(agentConfig.provider, config.providers);
@@ -40,6 +48,8 @@ export function createAgent(
         model: agentConfig.model,
         temperature: agentConfig.temperature,
         maxTokens: agentConfig.maxTokens,
+        tools: factoryOpts?.tools,
+        onToolCall: factoryOpts?.onToolCall,
     };
 
     switch (role) {

@@ -21,6 +21,36 @@ export interface ChatMessage {
     readonly content: string;
 }
 
+/** Provider-agnostic tool definition (maps to Anthropic tool / OpenAI function). */
+export interface ToolDefinition {
+    /** Unique tool name (snake_case). */
+    readonly name: string;
+    /** Human-readable description passed to the model. */
+    readonly description: string;
+    /** JSON Schema object describing the tool's input parameters. */
+    readonly inputSchema: Record<string, unknown>;
+}
+
+/** A tool call the model wants to make. */
+export interface ToolCall {
+    /** The tool name to invoke. */
+    readonly name: string;
+    /** The input arguments as parsed JSON. */
+    readonly input: Record<string, unknown>;
+    /** Provider-internal call ID (needed to send the result back). */
+    readonly callId: string;
+}
+
+/** The result of executing a tool call. */
+export interface ToolResult {
+    /** The call ID this result is responding to. */
+    readonly callId: string;
+    /** The tool's output as a string. */
+    readonly content: string;
+    /** Whether the tool call succeeded. */
+    readonly isError?: boolean;
+}
+
 /** Options for a chat completion request. */
 export interface ChatOptions {
     /** Model to use (overrides default from config). */
@@ -33,6 +63,10 @@ export interface ChatOptions {
     readonly stopSequences?: readonly string[];
     /** System prompt (some providers handle this separately). */
     readonly systemPrompt?: string;
+    /** Tools the model may call during this request. */
+    readonly tools?: readonly ToolDefinition[];
+    /** Callback invoked each time the model requests a tool call. Returns the result. */
+    readonly onToolCall?: (call: ToolCall) => Promise<ToolResult>;
 }
 
 /** Response from a non-streaming chat completion. */
