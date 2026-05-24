@@ -55,6 +55,8 @@ export abstract class BaseAgent {
     protected readonly maxTokens: number;
     protected readonly tools: readonly ToolDefinition[];
     protected readonly onToolCall?: (call: ToolCall) => Promise<ToolResult>;
+    /** Formatted memory section prepended to the system prompt. Set by factory. */
+    memorySection = '';
 
     constructor(
         role: AgentRole,
@@ -87,7 +89,10 @@ export abstract class BaseAgent {
         const label = AGENT_ROLE_LABELS[this.role];
         logger.info(`${label} starting...`);
 
-        const systemPrompt = this.buildSystemPrompt();
+        const basePrompt = this.buildSystemPrompt();
+        const systemPrompt = this.memorySection
+            ? `${this.memorySection}\n\n${basePrompt}`
+            : basePrompt;
         const userPrompt = this.buildUserPrompt(input);
 
         const messages: ChatMessage[] = [
@@ -133,7 +138,10 @@ export abstract class BaseAgent {
         const label = AGENT_ROLE_LABELS[this.role];
         logger.info(`${label} starting (streaming)...`);
 
-        const systemPrompt = this.buildSystemPrompt();
+        const basePrompt = this.buildSystemPrompt();
+        const systemPrompt = this.memorySection
+            ? `${this.memorySection}\n\n${basePrompt}`
+            : basePrompt;
         const userPrompt = this.buildUserPrompt(input);
 
         const messages: ChatMessage[] = [

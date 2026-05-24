@@ -23,6 +23,7 @@ import { gcCommand } from './commands/gc.js';
 import { mcpCommand } from './commands/mcp.js';
 import { pluginCommand } from './commands/plugin.js';
 import { uiCommand } from './commands/ui.js';
+import { memoryCommand } from './commands/memory.js';
 
 const program = new Command();
 
@@ -47,5 +48,6 @@ program.addCommand(gcCommand);
 program.addCommand(mcpCommand);
 program.addCommand(pluginCommand);
 program.addCommand(uiCommand);
+program.addCommand(memoryCommand);
 
 program.parse();

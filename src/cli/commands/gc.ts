@@ -8,6 +8,7 @@
 import { Command } from 'commander';
 import { pruneStaleWorktrees } from '../../git/worktree.js';
 import { loadConfig, configExists } from '../../core/config/manager.js';
+import { evictStaleMemories } from '../../memory/store.js';
 import { logger } from '../../utils/logger.js';
 
 const DEFAULT_MAX_AGE_DAYS = 7;
@@ -56,5 +57,10 @@ export const gcCommand = new Command('gc')
             logger.info(`No worktrees older than ${maxAgeDays} days to prune.`);
         } else {
             logger.success(`Pruned ${pruned} stale worktree(s).`);
+        }
+
+        const evicted = evictStaleMemories(projectRoot);
+        if (evicted > 0) {
+            logger.success(`Evicted ${evicted} stale memory entry(s).`);
         }
     });
