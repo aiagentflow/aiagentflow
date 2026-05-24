@@ -49,6 +49,14 @@ export const COST_PER_1M_TOKENS: Record<string, { input: number; output: number 
     'codellama:latest': { input: 0, output: 0 },
     'deepseek-coder:latest': { input: 0, output: 0 },
     'deepseek-r1:latest': { input: 0, output: 0 },
+    // OpenRouter — free tier models (":free" suffix)
+    'meta-llama/llama-3.1-8b-instruct:free': { input: 0, output: 0 },
+    'google/gemma-3-12b-it:free': { input: 0, output: 0 },
+    'mistralai/mistral-7b-instruct:free': { input: 0, output: 0 },
+    // OpenRouter — paid models (via proxy, pricing approximate)
+    'meta-llama/llama-3.1-70b-instruct': { input: 0.35, output: 0.40 },
+    'mistralai/mixtral-8x7b-instruct': { input: 0.24, output: 0.24 },
+    'deepseek/deepseek-r1': { input: 0.55, output: 2.19 },
 };
 
 /**

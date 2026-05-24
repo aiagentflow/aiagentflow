@@ -252,6 +252,24 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
         };
     }
 
+    if (selectedProviders.includes('openrouter')) {
+        const openrouterAnswers = await prompts([
+            {
+                type: 'password',
+                name: 'apiKey',
+                message: 'OpenRouter API key (from openrouter.ai):',
+                validate: (val: string) => val.length >= 8 || 'API key seems too short',
+            },
+        ]);
+
+        if (!openrouterAnswers.apiKey) return null;
+
+        config.providers.openrouter = {
+            apiKey: openrouterAnswers.apiKey,
+            baseUrl: 'https://openrouter.ai/api/v1',
+        };
+    }
+
     // ── Step 4: Agent Model Assignment ──
     logger.step(4, 6, 'Agent Model Assignment');
 
