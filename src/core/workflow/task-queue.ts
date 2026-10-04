@@ -10,9 +10,8 @@
 
 import pLimit from 'p-limit';
 import chalk from 'chalk';
-import { runWorkflow } from './runner.js';
+import { runWorkflow, type RunOptions } from './runner.js';
 import { BudgetTracker, type BudgetLimits } from './budget-tracker.js';
-import type { EventBus } from '../events.js';
 import type { WorkflowContext } from './engine.js';
 import { logger } from '../../utils/logger.js';
 
@@ -32,31 +31,20 @@ export interface QueuedTask {
     tokensUsed?: number;
 }
 
+/** Run options shared by every task in the queue. */
+export type SharedRunOptions = Pick<RunOptions, 'workflow' | 'events' | 'auto' | 'headless' | 'mode' | 'contextPaths' | 'dryRun' | 'isolation'>;
+
 /** Options for running a task queue. */
-export interface QueueOptions {
+export interface QueueOptions extends SharedRunOptions {
     /** Project root directory. */
     projectRoot: string;
     /** List of task descriptions. */
     tasks: string[];
-    /** Workflow to run for every task (default: "standard"). */
-    workflow?: string;
-    /** Receives run events from every task. */
-    events?: EventBus;
-    /** Skip human approval between tasks. */
-    auto?: boolean;
-    /** Workflow mode override (fast, balanced, strict). */
-    mode?: string;
     /** Stop the queue on first failure (sequential mode only). */
     stopOnFailure?: boolean;
-    /** Explicit context file paths to load. */
-    contextPaths?: string[];
-    /** Preview workflow plan without executing agents. */
-    dryRun?: boolean;
     /** Number of tasks to run in parallel (default: 1 = sequential). */
     parallel?: number;
-    /** Override isolation mode. Defaults to 'worktree' when parallel > 1. */
-    isolation?: 'worktree' | 'inplace';
-    /** Budget caps applied across all parallel tasks. */
+    /** Budget caps applied across all tasks. Each task gets what is left. */
     budget?: BudgetLimits;
 }
 
@@ -66,19 +54,7 @@ export interface QueueOptions {
  * Returns the queue with all results after completion.
  */
 export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]> {
-    const {
-        projectRoot,
-        tasks,
-        workflow,
-        events,
-        auto = false,
-        mode,
-        stopOnFailure = false,
-        contextPaths,
-        dryRun,
-        parallel = 1,
-        budget,
-    } = options;
+    const { projectRoot, tasks, stopOnFailure = false, parallel = 1, budget, ...shared } = options;
 
     // When parallel > 1, default to worktree isolation so tasks don't clobber each other
     const isolation = options.isolation ?? (parallel > 1 ? 'worktree' : undefined);
@@ -94,23 +70,26 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
 
     const budgetTracker = new BudgetTracker(budget ?? {});
     const isParallel = parallel > 1;
+    const run: RunnerParams = { projectRoot, shared: { ...shared, isolation }, budgetTracker };
 
     logger.header('AI Workflow — Task Queue');
     console.log(chalk.gray(`${queue.length} task(s) queued`));
     if (isParallel) console.log(chalk.blue(`Parallel: ${parallel} concurrent tasks`));
-    if (mode) console.log(chalk.blue(`Mode: ${mode}`));
-    if (auto) console.log(chalk.yellow('⚡ Autonomous mode'));
+    if (shared.mode) console.log(chalk.blue(`Mode: ${shared.mode}`));
+    if (shared.auto || shared.headless) console.log(chalk.yellow('⚡ Autonomous mode'));
     if (budget?.maxTokens) console.log(chalk.gray(`Token budget: ${budget.maxTokens.toLocaleString()}`));
     if (budget?.maxCostUsd) console.log(chalk.gray(`Cost budget: $${budget.maxCostUsd}`));
+    if (budget?.maxTimeMs) console.log(chalk.gray(`Time budget: ${Math.round(budget.maxTimeMs / 60_000)} min`));
     console.log();
 
     if (isParallel) {
-        await runParallel(queue, { projectRoot, workflow, events, auto, mode, contextPaths, dryRun, isolation, parallel, budgetTracker });
+        await runParallel(queue, run, parallel);
     } else {
-        await runSequential(queue, { projectRoot, workflow, events, auto, mode, stopOnFailure, contextPaths, dryRun, isolation, budgetTracker });
+        await runSequential(queue, run, stopOnFailure);
     }
 
     printQueueSummary(queue, budgetTracker);
+
     return queue;
 }
 
@@ -118,27 +97,17 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
 
 interface RunnerParams {
     projectRoot: string;
-    workflow?: string;
-    events?: EventBus;
-    auto: boolean;
-    mode?: string;
-    stopOnFailure?: boolean;
-    contextPaths?: string[];
-    dryRun?: boolean;
-    isolation?: 'worktree' | 'inplace';
-    parallel?: number;
+    shared: SharedRunOptions;
     budgetTracker: BudgetTracker;
 }
 
-async function runSequential(queue: QueuedTask[], params: RunnerParams): Promise<void> {
-    const { projectRoot, workflow, events, auto, mode, stopOnFailure, contextPaths, dryRun, isolation, budgetTracker } = params;
-
+async function runSequential(queue: QueuedTask[], params: RunnerParams, stopOnFailure: boolean): Promise<void> {
     for (let i = 0; i < queue.length; i++) {
         const item = queue[i]!;
 
-        if (budgetTracker.exceeded) {
+        if (params.budgetTracker.exceeded) {
             markRemaining(queue, i, 'skipped');
-            logger.warn('Budget cap reached — remaining tasks skipped.');
+            logger.warn(`${params.budgetTracker.exceededReason} — remaining tasks skipped.`);
             break;
         }
 
@@ -146,7 +115,7 @@ async function runSequential(queue: QueuedTask[], params: RunnerParams): Promise
         console.log(chalk.gray(item.task));
         console.log();
 
-        await executeTask(item, { projectRoot, workflow, events, auto, mode, contextPaths, dryRun, isolation, budgetTracker });
+        await executeTask(item, params);
 
         if (item.status === 'failed' && stopOnFailure) {
             markRemaining(queue, i + 1, 'skipped');
@@ -157,14 +126,12 @@ async function runSequential(queue: QueuedTask[], params: RunnerParams): Promise
 
 // ── Parallel runner ──
 
-async function runParallel(queue: QueuedTask[], params: RunnerParams): Promise<void> {
-    const { projectRoot, workflow, events, auto, mode, contextPaths, dryRun, isolation, parallel = 2, budgetTracker } = params;
+async function runParallel(queue: QueuedTask[], params: RunnerParams, parallel: number): Promise<void> {
     const limit = pLimit(parallel);
-    let budgetExceeded = false;
 
     const promises = queue.map((item, i) =>
         limit(async () => {
-            if (budgetExceeded || budgetTracker.exceeded) {
+            if (params.budgetTracker.exceeded) {
                 item.status = 'skipped';
                 return;
             }
@@ -172,11 +139,7 @@ async function runParallel(queue: QueuedTask[], params: RunnerParams): Promise<v
             console.log(chalk.bold(`\n── Task ${i + 1}/${queue.length} (parallel) ──`));
             console.log(chalk.gray(item.task));
 
-            await executeTask(item, { projectRoot, workflow, events, auto, mode, contextPaths, dryRun, isolation, budgetTracker });
-
-            if (budgetTracker.exceeded) {
-                budgetExceeded = true;
-            }
+            await executeTask(item, params);
         }),
     );
 
@@ -185,32 +148,26 @@ async function runParallel(queue: QueuedTask[], params: RunnerParams): Promise<v
 
 // ── Task executor ──
 
-async function executeTask(item: QueuedTask, params: Omit<RunnerParams, 'stopOnFailure' | 'parallel'>): Promise<void> {
-    const { projectRoot, workflow, events, auto, mode, contextPaths, dryRun, isolation } = params;
+async function executeTask(item: QueuedTask, params: RunnerParams): Promise<void> {
     item.status = 'running';
     const startTime = Date.now();
+    const hasBudget = Object.keys(params.budgetTracker.limits).length > 0;
 
     try {
         const result = await runWorkflow({
-            projectRoot,
+            ...params.shared,
+            projectRoot: params.projectRoot,
             task: item.task,
-            workflow,
-            events,
-            auto,
-            mode,
-            contextPaths,
-            dryRun,
-            isolation,
+            // Each task may spend what the queue has left (parallel tasks share the same remainder)
+            ...(hasBudget ? { budget: params.budgetTracker.remaining } : {}),
             // Batch tasks use streaming off by default — logs would interleave
             streaming: false,
         });
 
         item.result = result;
         item.duration = Date.now() - startTime;
-
-        // Token accumulation is done per-agent inside the runner's tokenTracker.
-        // Budget tracking via BudgetTracker happens at task granularity using estimated values.
-        item.tokensUsed = 0;
+        item.tokensUsed = result.usage?.totalTokens ?? 0;
+        params.budgetTracker.record(item.tokensUsed, result.usage?.costUsd ?? 0);
 
         item.status = result.status === 'failed' ? 'failed' : 'completed';
         if (result.status === 'failed') {
