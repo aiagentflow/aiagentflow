@@ -1,0 +1,127 @@
+name: aiagentflow
+description: Review pull requests or run aiagentflow workflows with quality-gated AI agents.
+author: aiagentflow
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  command:
+    description: "review (default): review the PR or push diff. run: run a workflow on a task."
+    default: review
+  task:
+    description: "Task for `command: run`."
+    default: ""
+  workflow:
+    description: Workflow to run (default for run is "standard"; review uses reviewer + security).
+    default: ""
+  fail-on:
+    description: "review: fail when a finding is at or above this severity (critical, high, medium, low, nit, never)."
+    default: high
+  comment:
+    description: "review: post findings as an inline PR review (needs pull-requests: write)."
+    default: "true"
+  provider:
+    description: Provider used when the repository has no .aiagentflow/config.json (anthropic, openai, groq, gemini, openrouter).
+    default: anthropic
+  model:
+    description: Model used when the repository has no .aiagentflow/config.json. Defaults to the provider's default.
+    default: ""
+  max-cost:
+    description: Stop when the estimated USD cost reaches this budget (exit code 3).
+    default: ""
+  max-time:
+    description: Stop after this many minutes (exit code 3).
+    default: ""
+  cli-version:
+    description: '@aiagentflow/cli version to install, or "local" to use an aiagentflow already on PATH.'
+    default: latest
+  working-directory:
+    description: Directory to run in.
+    default: "."
+
+outputs:
+  report:
+    description: "review: path of the markdown report."
+    value: ${{ steps.review.outputs.report }}
+  events:
+    description: "run: path of the NDJSON event log."
+    value: ${{ steps.run.outputs.events }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      if: inputs.cli-version != 'local'
+      with:
+        node-version: 22
+
+    - name: Install aiagentflow
+      if: inputs.cli-version != 'local'
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+      run: npm install --global "@aiagentflow/cli@${CLI_VERSION}"
+
+    - name: Create a config if the repository has none
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROVIDER: ${{ inputs.provider }}
+        MODEL: ${{ inputs.model }}
+      run: node "${GITHUB_ACTION_PATH}/write-config.mjs"
+
+    - name: Review
+      id: review
+      if: inputs.command == 'review'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BEFORE_SHA: ${{ github.event.before }}
+        WORKFLOW: ${{ inputs.workflow }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        COMMENT: ${{ inputs.comment }}
+        MAX_COST: ${{ inputs.max-cost }}
+        MAX_TIME: ${{ inputs.max-time }}
+        GH_TOKEN: ${{ env.GH_TOKEN || github.token }}
+      run: |
+        report="${RUNNER_TEMP}/aiagentflow-review.md"
+        echo "report=${report}" >> "$GITHUB_OUTPUT"
+        args=(review --fail-on "$FAIL_ON" --report "$report" --no-stream)
+        if [[ -n "$PR_NUMBER" ]]; then
+          args+=(--pr "$PR_NUMBER")
+          [[ "$COMMENT" == "true" ]] && args+=(--comment)
+        elif [[ -n "$BEFORE_SHA" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+          args+=(--diff "${BEFORE_SHA}..HEAD")
+        else
+          args+=(--diff "HEAD~1..HEAD")
+        fi
+        [[ -n "$WORKFLOW" ]] && args+=(--workflow "$WORKFLOW")
+        [[ -n "$MAX_COST" ]] && args+=(--max-cost "$MAX_COST")
+        [[ -n "$MAX_TIME" ]] && args+=(--max-time "$MAX_TIME")
+        status=0
+        aiagentflow "${args[@]}" || status=$?
+        [[ -f "$report" ]] && cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        exit $status
+
+    - name: Run
+      id: run
+      if: inputs.command == 'run'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TASK: ${{ inputs.task }}
+        WORKFLOW: ${{ inputs.workflow }}
+        MAX_COST: ${{ inputs.max-cost }}
+        MAX_TIME: ${{ inputs.max-time }}
+      run: |
+        if [[ -z "$TASK" ]]; then echo "::error::The run command needs a task input"; exit 2; fi
+        events="${RUNNER_TEMP}/aiagentflow-events.ndjson"
+        echo "events=${events}" >> "$GITHUB_OUTPUT"
+        args=(run "$TASK" --headless --output json --no-stream)
+        [[ -n "$WORKFLOW" ]] && args+=(--workflow "$WORKFLOW")
+        [[ -n "$MAX_COST" ]] && args+=(--max-cost "$MAX_COST")
+        [[ -n "$MAX_TIME" ]] && args+=(--max-time "$MAX_TIME")
+        aiagentflow "${args[@]}" > "$events"

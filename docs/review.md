@@ -28,6 +28,7 @@ When reviewing a PR locally, the agents read files from your current checkout. F
 | `--staged`, `--diff <range>`, `--pr <n>` | What to review (default: uncommitted changes) |
 | `--fail-on <severity>` | Exit 1 at or above this severity (default `high`) |
 | `--comment` | Post an inline PR review (needs `--pr`) |
+| `--report <file>` | Also write the markdown report to a file |
 | `-w, --workflow <name>` | Use another workflow instead of reviewer + security |
 | `--output json` | NDJSON [run events](events.md) on stdout |
 | `--max-tokens`, `--max-cost`, `--max-time` | [Budgets](headless.md#budgets) |

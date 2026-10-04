@@ -1,0 +1,50 @@
+name: aiagentflow review
+
+# Dogfoods ./action on this repository's pull requests, using the CLI built
+# from the PR itself. Skipped (with a notice) until an ANTHROPIC_API_KEY
+# secret is configured; fork PRs never receive secrets, so they skip too.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Check for an API key
+        id: key
+        run: |
+          if [[ -n "$ANTHROPIC_API_KEY" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::ANTHROPIC_API_KEY is not set; skipping the AI review."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          node-version: 22
+
+      - name: Build the CLI from this PR
+        if: steps.key.outputs.present == 'true'
+        run: npm install && npm run build && npm link
+
+      - uses: ./action
+        if: steps.key.outputs.present == 'true'
+        with:
+          cli-version: local
+          # Informational until the review has a track record on this repo
+          fail-on: critical
+          max-cost: "1"
+          max-time: "15"

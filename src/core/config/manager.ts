@@ -34,8 +34,40 @@ export function configExists(projectRoot: string): boolean {
     return fileExists(getConfigPath(projectRoot));
 }
 
+/** Environment variables that supply provider API keys. The first one set wins. */
+export const API_KEY_ENV_VARS: Readonly<Record<string, readonly string[]>> = {
+    anthropic: ['ANTHROPIC_API_KEY'],
+    openai: ['OPENAI_API_KEY'],
+    groq: ['GROQ_API_KEY'],
+    gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+    openrouter: ['OPENROUTER_API_KEY'],
+};
+
+/**
+ * Fill provider API keys from the environment, so config.json can be
+ * committed without secrets (e.g. in CI). A key in config.json wins over the
+ * environment. Providers referenced by an agent but missing from `providers`
+ * are added when their environment variable is set.
+ */
+export function applyEnvApiKeys(raw: unknown, env: NodeJS.ProcessEnv): unknown {
+    if (!raw || typeof raw !== 'object') return raw;
+    const config = raw as { providers?: Record<string, Record<string, unknown> | undefined>; agents?: Record<string, { provider?: string }> };
+    const providers = { ...(config.providers ?? {}) };
+    const used = new Set(Object.values(config.agents ?? {}).map(a => a?.provider));
+
+    for (const [name, vars] of Object.entries(API_KEY_ENV_VARS)) {
+        const fromEnv = vars.map(v => env[v]).find(Boolean);
+        if (!fromEnv) continue;
+        const section = providers[name];
+        if (section && !section.apiKey) providers[name] = { ...section, apiKey: fromEnv };
+        else if (!section && used.has(name)) providers[name] = { apiKey: fromEnv };
+    }
+    return { ...config, providers };
+}
+
 /**
  * Load and validate the configuration from disk.
+ * Provider API keys may come from environment variables (see API_KEY_ENV_VARS).
  *
  * @param projectRoot - The root directory of the project (where .aiagentflow/ lives)
  * @returns The validated AppConfig
@@ -53,7 +85,7 @@ export function loadConfig(projectRoot: string): AppConfig {
 
     logger.debug(`Loading config from ${configPath}`);
 
-    const raw = readJsonFile<unknown>(configPath);
+    const raw = applyEnvApiKeys(readJsonFile<unknown>(configPath), process.env);
     const result = appConfigSchema.safeParse(raw);
 
     if (!result.success) {
