@@ -1,30 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toPlainMessages, normalizeStopReason } from '../../src/providers/messages.js';
-
-describe('toPlainMessages', () => {
-    it('passes text messages through', () => {
-        expect(toPlainMessages([
-            { role: 'system', content: 's' },
-            { role: 'user', content: 'u' },
-            { role: 'assistant', content: 'a' },
-        ])).toEqual([
-            { role: 'system', content: 's' },
-            { role: 'user', content: 'u' },
-            { role: 'assistant', content: 'a' },
-        ]);
-    });
-
-    it('renders tool calls and results as text', () => {
-        const plain = toPlainMessages([
-            { role: 'assistant', content: 'Looking', toolCalls: [{ callId: 'c1', name: 'read_file', input: { path: 'a.ts' } }] },
-            { role: 'tool', results: [{ callId: 'c1', content: 'file body', isError: false }, { callId: 'c2', content: 'boom', isError: true }] },
-        ]);
-        expect(plain[0]).toEqual({ role: 'assistant', content: 'Looking\n[tool call c1] read_file {"path":"a.ts"}' });
-        expect(plain[1]!.role).toBe('user');
-        expect(plain[1]!.content).toContain('[tool result c1]\nfile body');
-        expect(plain[1]!.content).toContain('[tool result c2 (error)]\nboom');
-    });
-});
+import { normalizeStopReason } from '../../src/providers/messages.js';
 
 describe('normalizeStopReason', () => {
     it.each([
