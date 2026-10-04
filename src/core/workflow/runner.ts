@@ -31,6 +31,7 @@ import { WorkflowError } from '../errors.js';
 import { executeWorkflow } from './executor.js';
 import { PluginRegistry } from '../../plugins/registry.js';
 import type { BudgetLimits } from './budget-tracker.js';
+import type { ConfirmAnswer } from '../../tools/command.js';
 import { firstStep, type WorkflowDefinition } from './definition.js';
 import { DEFAULT_WORKFLOW, getWorkflow } from './workflow-loader.js';
 
@@ -67,6 +68,10 @@ export interface RunOptions {
     events?: EventBus;
     /** Never prompt: implies auto; interactive choices fall back to safe defaults. */
     headless?: boolean;
+    /** Ask someone else (e.g. an editor) to approve commands, instead of the terminal prompt. */
+    confirmCommand?: (command: string) => Promise<ConfirmAnswer>;
+    /** Stops the run before its next step when aborted. */
+    signal?: AbortSignal;
     /** Token, cost, and time caps for the run. */
     budget?: BudgetLimits;
 }
@@ -86,6 +91,10 @@ export interface ResumeOptions {
     events?: EventBus;
     /** Never prompt: implies auto; interactive choices fall back to safe defaults. */
     headless?: boolean;
+    /** Ask someone else (e.g. an editor) to approve commands, instead of the terminal prompt. */
+    confirmCommand?: (command: string) => Promise<ConfirmAnswer>;
+    /** Stops the run before its next step when aborted. */
+    signal?: AbortSignal;
     /** Token, cost, and time caps for the run. */
     budget?: BudgetLimits;
 }
@@ -175,6 +184,8 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         events: options.events,
         budget: options.budget,
         plugins,
+        confirmCommand: options.confirmCommand,
+        signal: options.signal,
     });
 }
 
@@ -303,6 +314,8 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
         events: options.events,
         budget: options.budget,
         plugins,
+        confirmCommand: options.confirmCommand,
+        signal: options.signal,
     });
 }
 
@@ -342,6 +355,8 @@ interface RunLoopParams {
     events?: EventBus;
     budget?: BudgetLimits;
     plugins: PluginRegistry;
+    confirmCommand?: (command: string) => Promise<ConfirmAnswer>;
+    signal?: AbortSignal;
 }
 
 /**
