@@ -11,11 +11,11 @@
 import { Command } from 'commander';
 import { writeFileSync } from 'node:fs';
 import { configExists } from '../../core/config/manager.js';
-import { listSessions, loadSession } from '../../core/workflow/session.js';
-import { formatVerdict, type Verdict, type VerdictRole } from '../../agents/verdicts.js';
+import { listSessions, loadSession, type SessionData } from '../../core/workflow/session.js';
+import { runLabel } from '../../core/workflow/engine.js';
+import { formatVerdict } from '../../agents/verdicts.js';
 import { AGENT_ROLE_LABELS } from '../../agents/types.js';
 import type { AgentRole } from '../../agents/types.js';
-import type { TokenUsageEntry } from '../../core/workflow/token-tracker.js';
 import { logger } from '../../utils/logger.js';
 
 export const exportCommand = new Command('export')
@@ -67,37 +67,23 @@ export const exportCommand = new Command('export')
 
 // ── Report builders ──
 
-export interface SessionLike {
-    id: string;
-    createdAt: number;
-    updatedAt: number;
-    context: {
-        task: string;
-        state: string;
-        iteration: number;
-        maxIterations: number;
-        generatedFiles: string[];
-        testFiles: string[];
-        reviewFeedback?: string;
-        securityFindings?: string;
-        testFailures?: string;
-        verdicts?: Partial<Record<VerdictRole, Verdict>>;
-        history: Array<{ from: string; to: string; event: string; timestamp: number }>;
-    };
-    tokenUsage: readonly TokenUsageEntry[];
-}
+export type SessionLike = Pick<SessionData, 'id' | 'createdAt' | 'updatedAt' | 'context' | 'tokenUsage'>;
 
 export function buildMarkdownReport(session: SessionLike): string {
     const ctx = session.context;
     const durationMs = session.updatedAt - session.createdAt;
     const duration = formatDuration(durationMs);
-    const passed = ctx.state === 'qa_approved' || ctx.state === 'complete';
-    const status = passed ? '✅ Passed' : ctx.state === 'failed' ? '❌ Failed' : `⏸ ${ctx.state}`;
+    const status = ctx.status === 'passed'
+        ? '✅ Passed'
+        : ctx.status === 'failed'
+            ? `❌ Failed${ctx.failureReason ? ` (${ctx.failureReason})` : ''}`
+            : `⏸ ${runLabel(ctx)}`;
 
     const lines: string[] = [
         `# Workflow Report`,
         ``,
         `**Task:** ${ctx.task}`,
+        `**Workflow:** ${ctx.workflow}`,
         `**Status:** ${status}`,
         `**Session:** \`${session.id}\``,
         `**Date:** ${new Date(session.createdAt).toISOString()}`,
@@ -157,13 +143,13 @@ export function buildMarkdownReport(session: SessionLike): string {
     if (ctx.history.length > 0) {
         lines.push(`## Timeline`);
         lines.push(``);
-        lines.push('| Step | From | Event | To | Time |');
-        lines.push('|------|------|-------|----|------|');
-        for (let i = 0; i < ctx.history.length; i++) {
-            const h = ctx.history[i]!;
+        lines.push('| # | Step | Agent | Outcome | Detail | Time |');
+        lines.push('|---|------|-------|---------|--------|------|');
+        ctx.history.forEach((h, i) => {
             const t = new Date(h.timestamp).toISOString().slice(11, 19);
-            lines.push(`| ${i + 1} | \`${h.from}\` | \`${h.event}\` | \`${h.to}\` | ${t} |`);
-        }
+            const agent = h.agent ? AGENT_ROLE_LABELS[h.agent] : '';
+            lines.push(`| ${i + 1} | \`${h.step}\` | ${agent} | ${h.outcome} | ${(h.detail ?? '').replace(/\|/g, '\\|')} | ${t} |`);
+        });
         lines.push(``);
     }
 
@@ -192,8 +178,10 @@ export function buildJsonReport(session: SessionLike): string {
     return JSON.stringify({
         id: session.id,
         task: ctx.task,
-        status: ctx.state,
-        passed: ctx.state === 'qa_approved' || ctx.state === 'complete',
+        workflow: ctx.workflow,
+        status: ctx.status,
+        passed: ctx.status === 'passed',
+        failureReason: ctx.failureReason ?? null,
         createdAt: new Date(session.createdAt).toISOString(),
         updatedAt: new Date(session.updatedAt).toISOString(),
         durationMs: session.updatedAt - session.createdAt,

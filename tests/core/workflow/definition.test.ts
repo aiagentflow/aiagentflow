@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseWorkflow, nextStep, firstStep, stepById, type WorkflowDefinition } from '../../../src/core/workflow/definition.js';
 import { getWorkflow, loadWorkflows } from '../../../src/core/workflow/workflow-loader.js';
-import { STATE_AGENT_MAP } from '../../../src/core/workflow/engine.js';
 
 const minimal = (steps: string) => `name: mini\nsteps:\n${steps}`;
 
@@ -72,8 +71,8 @@ describe('built-in standard workflow', () => {
     const agentOf = (id: string) => stepById(wf, id)!.agent;
 
     it('runs the same agents in the same order as the v1 state machine', () => {
-        const v1Happy = ['idle', 'plan_approved', 'code_generated', 'review_done', 'security_checked', 'tests_passed']
-            .map(state => STATE_AGENT_MAP[state as keyof typeof STATE_AGENT_MAP]);
+        // v1 state machine happy path: idle → plan_approved → code_generated → review_done → security_checked → tests_passed
+        const v1Happy = ['architect', 'coder', 'reviewer', 'security', 'tester', 'judge'];
         const v2Happy: string[] = [];
         for (let s: WorkflowDefinition['steps'][number] | undefined = firstStep(wf); s; s = nextStep(wf, s)) v2Happy.push(s.agent);
         expect(v2Happy).toEqual(v1Happy);
@@ -84,7 +83,7 @@ describe('built-in standard workflow', () => {
             expect(agentOf(stepById(wf, id)!.onFail!)).toBe('fixer');
         }
         // v1: fix_applied -> code_generated -> reviewer
-        expect(agentOf(nextStep(wf, stepById(wf, 'fix')!)!.id)).toBe(STATE_AGENT_MAP.code_generated);
+        expect(agentOf(nextStep(wf, stepById(wf, 'fix')!)!.id)).toBe('reviewer');
     });
 
     it('gates the judging steps on verdicts and runs the v1 checks', () => {

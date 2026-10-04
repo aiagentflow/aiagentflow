@@ -2,7 +2,9 @@
  * Human approval — interactive prompts for stage gates.
  *
  * When `humanApproval` is enabled in config, the workflow pauses
- * between stages and asks the user to approve, edit, or abort.
+ * between steps and asks the user to approve, retry, or abort. Steps with
+ * `approval: true` (or roles in approvalGates) get a full review: approve,
+ * edit, regenerate, or abort.
  *
  * Dependency direction: approval.ts → prompts, chalk, utils
  * Used by: workflow runner
@@ -36,7 +38,7 @@ export async function requestApproval(
     console.log(preview);
 
     console.log();
-    console.log(chalk.gray(`State: ${ctx.state} | Iteration: ${ctx.iteration}/${ctx.maxIterations}`));
+    console.log(chalk.gray(`Next step: ${ctx.step ?? '(done)'} | Iteration: ${ctx.iteration}/${ctx.maxIterations}`));
     console.log();
 
     const { decision } = await prompts({
@@ -57,53 +59,37 @@ export async function requestApproval(
 }
 
 /**
- * Check if approval is needed based on config and current state.
+ * Result of reviewing a step's output.
  */
-export function needsApproval(humanApproval: boolean, state: string): boolean {
-    if (!humanApproval) return false;
-
-    // Skip approval for terminal states
-    const skipStates = ['complete', 'failed', 'idle'];
-    return !skipStates.includes(state);
-}
-
-/**
- * Result of a plan approval gate.
- */
-export type PlanApprovalResult =
-    | { action: 'approve'; plan: string }
-    | { action: 'edit'; plan: string }
+export type StepReviewResult =
+    | { action: 'approve'; output: string }
+    | { action: 'edit'; output: string }
     | { action: 'regenerate'; feedback: string }
     | { action: 'abort' };
 
 /**
- * Show the Architect's plan to the user and let them approve, edit, regenerate, or abort.
- * Returns what should happen next and the (possibly modified) plan text.
- *
- * Loops up to maxRegenerations times if the user keeps choosing "regenerate".
+ * Show a step's output (usually the Architect's plan) and let the user
+ * approve, edit, regenerate, or abort before the workflow continues.
  */
-export async function requestPlanApproval(
-    plan: string,
-    _ctx: WorkflowContext,
-): Promise<PlanApprovalResult> {
+export async function requestStepReview(label: string, output: string): Promise<StepReviewResult> {
     console.log();
-    console.log(chalk.bold.cyan('── Architect Plan ──'));
+    console.log(chalk.bold.cyan(`── ${label} Output ──`));
     console.log();
 
-    const preview = plan.length > 1200
-        ? plan.slice(0, 1200) + chalk.gray('\n... (truncated — choose Edit to see full plan)')
-        : plan;
+    const preview = output.length > 1200
+        ? output.slice(0, 1200) + chalk.gray('\n... (truncated — choose Edit to see all of it)')
+        : output;
     console.log(preview);
     console.log();
 
     const { action } = await prompts({
         type: 'select',
         name: 'action',
-        message: 'Review the plan before the Coder starts:',
+        message: 'Review this before the workflow continues:',
         choices: [
-            { title: chalk.green('✔ Approve') + ' — proceed with this plan', value: 'approve' },
+            { title: chalk.green('✔ Approve') + ' — continue with this output', value: 'approve' },
             { title: chalk.yellow('✎ Edit') + ' — open in $EDITOR to modify', value: 'edit' },
-            { title: chalk.blue('↻ Regenerate') + ' — ask Architect to try again', value: 'regenerate' },
+            { title: chalk.blue('↻ Regenerate') + ' — run this step again with feedback', value: 'regenerate' },
             { title: chalk.red('✘ Abort') + ' — stop the workflow', value: 'abort' },
         ],
         initial: 0,
@@ -111,18 +97,17 @@ export async function requestPlanApproval(
 
     if (!action || action === 'abort') return { action: 'abort' };
 
-    if (action === 'approve') return { action: 'approve', plan };
+    if (action === 'approve') return { action: 'approve', output };
 
     if (action === 'edit') {
-        const edited = await openInEditor(plan);
-        return { action: 'edit', plan: edited };
+        const edited = await openInEditor(output);
+        return { action: 'edit', output: edited };
     }
 
-    // Regenerate — collect feedback
     const { feedback } = await prompts({
         type: 'text',
         name: 'feedback',
-        message: 'What should the Architect change? (one-line nudge):',
+        message: 'What should change? (one-line nudge):',
     });
 
     return { action: 'regenerate', feedback: (feedback as string | undefined) ?? '' };

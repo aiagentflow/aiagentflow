@@ -19,14 +19,14 @@ describe('--dry-run flag', () => {
         rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    it('returns idle context without executing agents', async () => {
+    it('returns a fresh context without executing agents', async () => {
         const result = await runWorkflow({
             projectRoot: tmpDir,
             task: 'Add a login page',
             dryRun: true,
         });
 
-        expect(result.state).toBe('idle');
+        expect(result).toMatchObject({ status: 'running', step: 'plan', workflow: 'standard' });
         expect(result.task).toBe('Add a login page');
         expect(result.history).toHaveLength(0);
         expect(result.generatedFiles).toHaveLength(0);
@@ -40,7 +40,7 @@ describe('--dry-run flag', () => {
         });
 
         // If it tried to create a branch in a non-git dir, it would throw
-        expect(result.state).toBe('idle');
+        expect(result.status).toBe('running');
     });
 
     it('respects mode override in dry run', async () => {
@@ -52,7 +52,7 @@ describe('--dry-run flag', () => {
         });
 
         // Should complete without error — mode is applied to config display
-        expect(result.state).toBe('idle');
+        expect(result.status).toBe('running');
         expect(result.maxIterations).toBe(10); // strict mode sets this
     });
 });

@@ -201,9 +201,9 @@ async function executeTask(item: QueuedTask, params: Omit<RunnerParams, 'stopOnF
         // Budget tracking via BudgetTracker happens at task granularity using estimated values.
         item.tokensUsed = 0;
 
-        item.status = result.state === 'failed' ? 'failed' : 'completed';
-        if (result.state === 'failed') {
-            item.error = 'Workflow ended in failed state';
+        item.status = result.status === 'failed' ? 'failed' : 'completed';
+        if (result.status === 'failed') {
+            item.error = result.failureReason ?? 'Workflow failed';
         }
     } catch (err) {
         item.status = 'failed';

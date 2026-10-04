@@ -11,7 +11,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { listSessions } from '../../core/workflow/session.js';
-import { isTerminal } from '../../core/workflow/engine.js';
+import { isTerminal, runLabel } from '../../core/workflow/engine.js';
 import { logger } from '../../utils/logger.js';
 
 export const sessionsCommand = new Command('sessions')
@@ -36,20 +36,17 @@ export const sessionsCommand = new Command('sessions')
                 ? context.task.slice(0, 57) + '...'
                 : context.task;
 
-            let stateLabel: string;
-            if (context.state === 'complete' || context.state === 'qa_approved') {
-                stateLabel = chalk.green(context.state);
-            } else if (context.state === 'failed') {
-                stateLabel = chalk.red(context.state);
-            } else if (isTerminal(context)) {
-                stateLabel = chalk.gray(context.state);
-            } else {
-                stateLabel = chalk.yellow(context.state) + chalk.gray(' (resumable)');
-            }
+            const label = runLabel(context);
+            const stateLabel = context.status === 'passed'
+                ? chalk.green(label)
+                : context.status === 'failed'
+                    ? chalk.red(label)
+                    : chalk.yellow(label) + chalk.gray(' (resumable)');
 
             console.log(`  ${chalk.bold(id)}`);
             console.log(chalk.gray(`    Task:     ${taskPreview}`));
-            console.log(chalk.gray(`    State:    `) + stateLabel);
+            console.log(chalk.gray(`    Workflow: ${context.workflow}`));
+            console.log(chalk.gray(`    Status:   `) + stateLabel);
             console.log(chalk.gray(`    Updated:  ${updated}`));
             console.log(chalk.gray(`    Duration: ${duration}`));
             console.log();

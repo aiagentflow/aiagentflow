@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { execaSync } from 'execa';
 import { MockProvider, type MockStep } from '../../helpers/mock-provider.js';
 import { DEFAULT_CONFIG } from '../../../src/core/config/defaults.js';
-import { listSessions } from '../../../src/core/workflow/session.js';
+import { listSessions, saveSession } from '../../../src/core/workflow/session.js';
+import { createWorkflowContext } from '../../../src/core/workflow/engine.js';
 import { setLogLevel, getLogLevel, LogLevel } from '../../../src/utils/logger.js';
 
 const holder = vi.hoisted(() => ({ provider: undefined as unknown }));
@@ -15,7 +16,7 @@ vi.mock('../../../src/providers/registry.js', async (importOriginal) => {
     return { ...actual, createProvider: () => holder.provider };
 });
 
-const { runWorkflow } = await import('../../../src/core/workflow/runner.js');
+const { runWorkflow, resumeWorkflow } = await import('../../../src/core/workflow/runner.js');
 
 // Passes only when src/fixed.ts exists, so tests can drive the fail -> fix -> pass loop.
 const CHECK_SCRIPT = `const fs = require('fs');
@@ -90,13 +91,12 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
         dir = setupProject();
         const { ctx, provider } = await run(dir, [PLAN, CODE, APPROVE, PASS, TESTS, PASS]);
 
-        expect(ctx.state).toBe('qa_approved');
+        expect(ctx.status).toBe('passed');
         expect(provider.remaining).toBe(0);
         expect(readFileSync(join(dir, 'src', 'app.ts'), 'utf-8')).toContain('export const app = 1');
         expect(existsSync(join(dir, 'tests', 'app.test.ts'))).toBe(true);
-        expect(ctx.history.map(h => h.to)).toEqual([
-            'spec_created', 'plan_approved', 'code_generated', 'review_done',
-            'security_checked', 'tests_written', 'tests_passed', 'qa_approved',
+        expect(ctx.history.map(h => `${h.step}:${h.outcome}`)).toEqual([
+            'plan:passed', 'implement:passed', 'review:passed', 'security:passed', 'test:passed', 'judge:passed',
         ]);
     });
 
@@ -126,9 +126,9 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             PLAN, CODE, REJECT, FIX, APPROVE, PASS, TESTS, PASS,
         ]);
 
-        expect(ctx.state).toBe('qa_approved');
+        expect(ctx.status).toBe('passed');
         expect(ctx.iteration).toBe(1);
-        expect(ctx.history.map(h => h.to)).toContain('review_rejected');
+        expect(ctx.history.map(h => `${h.step}:${h.outcome}`)).toContain('review:failed');
     });
 
     it('routes a test failure to the fixer, which makes tests pass', async () => {
@@ -138,8 +138,8 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             FIX, APPROVE, PASS, TESTS, PASS,
         ]);
 
-        expect(ctx.state).toBe('qa_approved');
-        expect(ctx.history.map(h => h.to)).toContain('tests_failed');
+        expect(ctx.status).toBe('passed');
+        expect(ctx.history.map(h => `${h.step}:${h.outcome}`)).toContain('test:failed');
         expect(existsSync(join(dir, 'src', 'fixed.ts'))).toBe(true);
         // Fixer sees the failing test output
         expect(provider.userPrompt(5)).toContain('expected src/fixed.ts to exist');
@@ -149,7 +149,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
         dir = setupProject({ maxIterations: 2 });
         const { ctx } = await run(dir, [PLAN, CODE, REJECT, FIX, REJECT]);
 
-        expect(ctx.state).toBe('failed');
+        expect(ctx.status).toBe('failed');
     });
 
     it('saves a session for the run', async () => {
@@ -158,7 +158,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
 
         const sessions = listSessions(dir);
         expect(sessions).toHaveLength(1);
-        expect(sessions[0]!.context.state).toBe('qa_approved');
+        expect(sessions[0]!.context.status).toBe('passed');
         // Usage comes from the provider: 10 prompt tokens per call in the mock
         const usage = sessions[0]!.tokenUsage;
         expect(usage.map(u => u.role)).toEqual(['architect', 'coder', 'reviewer', 'security', 'tester', 'judge']);
@@ -193,7 +193,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
                 PASS,
             ]);
 
-            expect(ctx.state).toBe('qa_approved');
+            expect(ctx.status).toBe('passed');
             expect(provider.remaining).toBe(0);
             expect(ctx.generatedFiles).toEqual(expect.arrayContaining(['src/app.ts', 'src/fixed.ts']));
             expect(ctx.testFiles).toEqual(expect.arrayContaining(['tests/app.test.ts']));
@@ -225,7 +225,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             dir = setupProject();
             const { ctx, provider } = await run(dir, [PLAN, CODE, REJECT, FIX, APPROVE, PASS, TESTS, PASS]);
 
-            expect(ctx.state).toBe('qa_approved');
+            expect(ctx.status).toBe('passed');
             expect(ctx.verdicts?.reviewer?.verdict).toBe('approve');
             expect(ctx.verdicts?.judge?.verdict).toBe('pass');
             expect(provider.userPrompt(3)).toContain('1. [high] src/app.ts rename app');
@@ -236,7 +236,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             // "APPROVE" in text is ignored; the tool call says request_changes
             const prose: MockStep = { content: 'I would APPROVE this, but', toolCalls: REJECT.toolCalls };
             const { ctx } = await run(dir, [PLAN, CODE, prose, FIX, APPROVE, PASS, TESTS, PASS]);
-            expect(ctx.history.map(h => h.to)).toContain('review_rejected');
+            expect(ctx.history.map(h => `${h.step}:${h.outcome}`)).toContain('review:failed');
         });
 
         it('reminds an agent once, then accepts a JSON verdict in text', async () => {
@@ -247,7 +247,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
                 '```json\n{"verdict":"approve","summary":"fine","issues":[]}\n```',
                 PASS, TESTS, PASS,
             ]);
-            expect(ctx.state).toBe('qa_approved');
+            expect(ctx.status).toBe('passed');
             const reminder = provider.calls[3]!.messages.at(-1);
             expect(reminder).toMatchObject({ role: 'user', content: expect.stringContaining('submit_verdict') });
         });
@@ -255,17 +255,81 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
         it('fails the run clearly when no valid verdict arrives', async () => {
             dir = setupProject();
             const { ctx } = await run(dir, [PLAN, CODE, 'Looks good.', 'Still looks good.']);
-            expect(ctx.state).toBe('failed');
+            expect(ctx.status).toBe('failed');
         });
 
         it('returns schema errors to the agent so it can correct the verdict', async () => {
             dir = setupProject();
             const bad: MockStep = { content: '', toolCalls: [{ name: 'submit_verdict', input: { verdict: 'maybe', summary: '' } }] };
             const { ctx, provider } = await run(dir, [PLAN, CODE, bad, APPROVE, PASS, TESTS, PASS]);
-            expect(ctx.state).toBe('qa_approved');
+            expect(ctx.status).toBe('passed');
             expect(provider.calls[3]!.messages.at(-1)).toMatchObject({
                 role: 'tool', results: [{ isError: true, content: expect.stringContaining('Invalid verdict') }],
             });
+        });
+    });
+
+    describe('custom workflows and resume', () => {
+        const QUICK = [
+            'name: quick',
+            'steps:',
+            '  - id: code',
+            '    agent: coder',
+            '  - id: test',
+            '    agent: tester',
+            '    checks: [test]',
+            '    onFail: repair',
+            '  - id: repair',
+            '    agent: fixer',
+            '    trigger: on-fail',
+            '    next: test',
+            '',
+        ].join('\n');
+
+        function addQuickWorkflow() {
+            mkdirSync(join(dir, '.aiagentflow', 'workflows'), { recursive: true });
+            writeFileSync(join(dir, '.aiagentflow', 'workflows', 'quick.yml'), QUICK);
+        }
+
+        it('runs a project-defined workflow', async () => {
+            dir = setupProject({ requireFix: true });
+            addQuickWorkflow();
+            holder.provider = new MockProvider([CODE, TESTS, FIX, TESTS]);
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Quick task', workflow: 'quick', auto: true, streaming: false, isolation: 'inplace', showSummary: false });
+
+            expect(ctx.status).toBe('passed');
+            expect(ctx.history.map(h => `${h.step}:${h.outcome}`)).toEqual(['code:passed', 'test:failed', 'repair:passed', 'test:passed']);
+        });
+
+        it('resumes an interrupted run of a custom workflow at its saved step', async () => {
+            dir = setupProject();
+            addQuickWorkflow();
+            const interrupted = { ...createWorkflowContext('Quick task', 'quick', 'code'), step: 'test', generatedFiles: ['src/app.ts'] };
+            saveSession(dir, interrupted, [], 'interrupted');
+
+            const provider = new MockProvider([TESTS]);
+            holder.provider = provider;
+            const ctx = await resumeWorkflow({ projectRoot: dir, sessionId: 'interrupted', auto: true, streaming: false });
+
+            expect(ctx.status).toBe('passed');
+            expect(provider.calls).toHaveLength(1);
+            expect(ctx.history.map(h => h.step)).toEqual(['test']);
+        });
+
+        it('resumes a v1 session on the standard workflow', async () => {
+            dir = setupProject();
+            mkdirSync(join(dir, '.aiagentflow', 'sessions'), { recursive: true });
+            writeFileSync(join(dir, '.aiagentflow', 'sessions', 'v1.json'), JSON.stringify({
+                id: 'v1', createdAt: 1, updatedAt: 1, tokenUsage: [],
+                context: { task: 'Old task', state: 'tests_passed', iteration: 0, maxIterations: 5, generatedFiles: [], testFiles: [], previousFailures: [], history: [] },
+            }));
+            const provider = new MockProvider([PASS]);
+            holder.provider = provider;
+
+            const ctx = await resumeWorkflow({ projectRoot: dir, sessionId: 'v1', auto: true, streaming: false });
+
+            expect(ctx.status).toBe('passed');
+            expect(ctx.history.map(h => h.step)).toEqual(['judge']);
         });
     });
 });

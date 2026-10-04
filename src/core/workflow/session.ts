@@ -13,7 +13,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { CONFIG_DIR_NAME } from '../config/defaults.js';
 import { ensureDir, readTextFile, writeJsonFile } from '../../utils/fs.js';
 import { logger } from '../../utils/logger.js';
-import type { WorkflowContext } from './engine.js';
+import { normalizeContext, type WorkflowContext } from './engine.js';
 import type { TokenUsageEntry } from './token-tracker.js';
 
 const SESSIONS_DIR = 'sessions';
@@ -101,8 +101,7 @@ export function loadSession(projectRoot: string, sessionId: string): SessionData
     }
 
     try {
-        const content = readTextFile(sessionPath);
-        return JSON.parse(content) as SessionData;
+        return parseSession(readTextFile(sessionPath));
     } catch {
         logger.warn(`Failed to load session: ${sessionId}`);
         return null;
@@ -124,12 +123,17 @@ export function listSessions(projectRoot: string): SessionData[] {
 
     for (const file of files) {
         try {
-            const content = readTextFile(join(sessionsDir, file));
-            sessions.push(JSON.parse(content) as SessionData);
+            sessions.push(parseSession(readTextFile(join(sessionsDir, file))));
         } catch {
             // Skip corrupted session files
         }
     }
 
     return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** Parse a session file, converting v1 contexts to the current shape. */
+function parseSession(json: string): SessionData {
+    const data = JSON.parse(json) as SessionData;
+    return { ...data, context: normalizeContext(data.context) };
 }

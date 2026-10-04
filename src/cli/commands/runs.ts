@@ -12,37 +12,33 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { listWorktrees } from '../../git/worktree.js';
 import { listSessions, type SessionData } from '../../core/workflow/session.js';
+import { runLabel, type RunStatus } from '../../core/workflow/engine.js';
 import { loadConfig, configExists } from '../../core/config/manager.js';
 import { logger } from '../../utils/logger.js';
 import { costOf } from '../../core/workflow/token-tracker.js';
 
-type RunState = 'complete' | 'qa_approved' | 'failed' | 'awaiting_approval' | 'running' | string;
-
 interface RunRow {
     branch: string;
-    state: RunState;
+    /** passed, failed, running, or unknown (no session). */
+    status: RunStatus | 'unknown';
+    /** Display label, e.g. "at review". */
+    label: string;
     ageMs: number;
     tokens: number;
     costUsd: number;
     session: SessionData | undefined;
 }
 
-const STATUS_ICONS: Record<string, string> = {
-    qa_approved: '✓',
-    complete: '✓',
+const STATUS_ICONS: Record<RunRow['status'], string> = {
+    passed: '✓',
     failed: '✗',
-    plan_pending: '⏸',
-    awaiting_approval: '⏸',
+    running: '⏵',
+    unknown: '?',
 };
 
-function statusIcon(state: string): string {
-    return STATUS_ICONS[state] ?? '⏵';
-}
-
-function stateColor(state: string): (s: string) => string {
-    if (state === 'qa_approved' || state === 'complete') return chalk.green;
-    if (state === 'failed') return chalk.red;
-    if (state === 'plan_pending' || state === 'awaiting_approval') return chalk.blue;
+function statusColor(status: RunRow['status']): (s: string) => string {
+    if (status === 'passed') return chalk.green;
+    if (status === 'failed') return chalk.red;
     return chalk.yellow;
 }
 
@@ -53,7 +49,7 @@ function sessionCost(session: SessionData): number {
 
 export const runsCommand = new Command('runs')
     .description('List active worktree-based task runs')
-    .option('--filter <state>', 'Filter by state (running, complete, failed, waiting)')
+    .option('--filter <status>', 'Filter by status (running, passed, failed)')
     .option('--json', 'Output as JSON')
     .action(async (opts: { filter?: string; json?: boolean }) => {
         const projectRoot = process.cwd();
@@ -75,11 +71,11 @@ export const runsCommand = new Command('runs')
 
         let rows: RunRow[] = worktrees.map(wt => {
             const session = sessionByBranch.get(wt.branch);
-            const state = session?.context.state ?? 'unknown';
             const tokens = session?.tokenUsage?.reduce((s, e) => s + e.totalTokens, 0) ?? 0;
             return {
                 branch: wt.branch,
-                state,
+                status: session?.context.status ?? 'unknown',
+                label: session ? runLabel(session.context) : 'unknown',
                 ageMs: session ? Date.now() - session.createdAt : 0,
                 tokens,
                 costUsd: session ? sessionCost(session) : 0,
@@ -90,21 +86,17 @@ export const runsCommand = new Command('runs')
         // Apply --filter
         if (opts.filter) {
             const f = opts.filter.toLowerCase();
-            rows = rows.filter(r => {
-                const s = r.state.toLowerCase();
-                if (f === 'complete') return s === 'qa_approved' || s === 'complete';
-                if (f === 'failed') return s === 'failed';
-                if (f === 'waiting') return s === 'plan_pending' || s === 'awaiting_approval';
-                if (f === 'running') return s !== 'qa_approved' && s !== 'complete' && s !== 'failed';
-                return s.includes(f);
-            });
+            // "complete" is kept as an alias of "passed" for v1 scripts
+            const wanted = f === 'complete' ? 'passed' : f;
+            rows = rows.filter(r => r.status === wanted);
         }
 
         // JSON output
         if (opts.json) {
             console.log(JSON.stringify(rows.map(r => ({
                 branch: r.branch,
-                state: r.state,
+                status: r.status,
+                step: r.session?.context.step ?? null,
                 ageSec: Math.floor(r.ageMs / 1000),
                 tokens: r.tokens,
                 costUsd: parseFloat(r.costUsd.toFixed(6)),
@@ -124,15 +116,15 @@ export const runsCommand = new Command('runs')
         }
 
         console.log(chalk.bold(`\n  ${rows.length} run(s)\n`));
-        const header = ['', 'Branch', 'State', 'Age', 'Tokens', 'Cost'];
+        const header = ['', 'Branch', 'Status', 'Age', 'Tokens', 'Cost'];
         const widths = [3, 40, 22, 8, 10, 10];
         console.log(chalk.gray('  ' + header.map((h, i) => h.padEnd(widths[i]!)).join('')));
         console.log(chalk.gray('  ' + '─'.repeat(93)));
 
         for (const row of rows) {
-            const icon = stateColor(row.state)(statusIcon(row.state));
+            const icon = statusColor(row.status)(STATUS_ICONS[row.status]);
             const branch = chalk.cyan(row.branch.slice(0, 38).padEnd(widths[1]!));
-            const state = stateColor(row.state)(row.state.padEnd(widths[2]!));
+            const state = statusColor(row.status)(row.label.padEnd(widths[2]!));
             const age = chalk.gray(formatAge(row.ageMs).padEnd(widths[3]!));
             const tokens = chalk.gray((row.tokens > 0 ? row.tokens.toLocaleString() : '—').padEnd(widths[4]!));
             const cost = chalk.gray(row.costUsd > 0 ? `$${row.costUsd.toFixed(4)}` : '—');

@@ -1,59 +1,43 @@
 /**
- * Workflow runner — orchestrates agents through the workflow engine.
+ * Workflow runner — prepares a run and hands it to the executor.
  *
- * This is the main "brain" that:
- * 1. Creates a workflow context for a task
- * 2. Determines which agent to run next
- * 3. Executes agents and feeds output to the workflow engine
- * 4. Handles transitions, loops, and terminal states
- * 5. Tracks token usage and persists session state
+ * This module:
+ * 1. Loads config, the workflow definition, context documents, and MCP servers
+ * 2. Creates (or restores) the run context and the worktree, if isolated
+ * 3. Runs the workflow through the executor, saving the session after each step
+ * 4. Auto-commits, finishes the worktree, and prints summaries
  *
- * Dependency direction: runner.ts → engine, agents/factory, git/client, config
- * Used by: cli/commands/run.ts
+ * Dependency direction: runner.ts → executor, engine, workflow-loader, git, config
+ * Used by: cli/commands/run.ts, cli/commands/resume.ts, task-queue
  */
 
 import chalk from 'chalk';
-import ora from 'ora';
 import prompts from 'prompts';
-import {
-    createWorkflowContext,
-    transition,
-    isTerminal,
-    getNextAgent,
-    type WorkflowContext,
-} from './engine.js';
-import type { AgentRole } from '../../agents/types.js';
-import type { AgentOutput } from '../../agents/base.js';
-import { isPositive, type Verdict, type VerdictRole } from '../../agents/verdicts.js';
+import { createWorkflowContext, isTerminal, type WorkflowContext } from './engine.js';
 import { AGENT_ROLE_LABELS } from '../../agents/types.js';
-import { createAgent } from '../../agents/factory.js';
 import { GitClient } from '../../git/client.js';
 import { createWorktree, mergeBranch, worktreeExists, type WorktreeInfo } from '../../git/worktree.js';
-import { parseAndWriteFiles } from './file-parser.js';
-import { runTests } from './test-runner.js';
-import { runLint, runFormat } from './lint-runner.js';
-import { requestApproval, needsApproval, requestPlanApproval, isApprovalGated } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
 import { saveSession, loadSession, listSessions } from './session.js';
-import { loadQAPolicy, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
-import { loadContextDocuments, formatContextForAgent, loadSourceFiles, formatSourcesForAgent, type ContextDocument } from './context-loader.js';
+import { loadQAPolicy, type QAPolicy } from './qa-policy.js';
+import { loadContextDocuments, loadSourceFiles, type ContextDocument } from './context-loader.js';
 import { loadConfig } from '../config/manager.js';
 import { McpRegistry } from '../../mcp/registry.js';
 import type { AppConfig } from '../config/types.js';
 import { logger } from '../../utils/logger.js';
-import { buildTestCommand } from '../../utils/package-manager.js';
 import { WORKFLOW_PRESETS, type WorkflowMode } from '../config/defaults.js';
 import { WorkflowError } from '../errors.js';
-import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
-import { confirmCommand } from '../../cli/utils/confirm-command.js';
-import { ChangeSet } from '../../tools/repo.js';
-import { buildRepoMap } from './repo-map.js';
+import { executeWorkflow } from './executor.js';
+import { firstStep, type WorkflowDefinition } from './definition.js';
+import { DEFAULT_WORKFLOW, getWorkflow } from './workflow-loader.js';
 
 export interface RunOptions {
     /** Project root directory. */
     projectRoot: string;
     /** The task to accomplish. */
     task: string;
+    /** Workflow to run (default: "standard"). */
+    workflow?: string;
     /** Skip all human approval gates (autonomous mode). */
     auto?: boolean;
     /** Workflow mode override (fast, balanced, strict). Overrides config. */
@@ -86,15 +70,13 @@ export interface ResumeOptions {
 }
 
 /**
- * Run a full workflow for a task.
- *
- * Orchestrates the agent pipeline: Architect → Coder → Reviewer → Tester → Fixer → Judge.
- * Returns the final workflow context with all accumulated data.
+ * Run a workflow for a task. Returns the final run context.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
     const { projectRoot, task, auto = false, mode, contextPaths, streaming = true, dryRun = false, showSummary = true } = options;
     const config = loadConfig(projectRoot);
     const isolationMode = options.isolation ?? config.workflow.isolation;
+    const { definition: workflow } = getWorkflow(projectRoot, options.workflow ?? DEFAULT_WORKFLOW);
 
     // Merge CLI approval gates into config
     if (options.approvalGates && options.approvalGates.length > 0) {
@@ -106,26 +88,19 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         applyModePreset(config, mode);
     }
 
-    const tokenTracker = new TokenTracker();
-    const qaPolicy = loadQAPolicy(projectRoot);
+    const maxIterations = workflow.maxIterations ?? config.workflow.maxIterations;
     const contextDocs = loadContextDocuments(projectRoot, contextPaths);
     const sourceDocs = loadLegacySources(projectRoot, config);
 
-    // Start MCP servers if configured
-    const mcpRegistry = new McpRegistry();
-    const mcpServerCount = Object.keys(config.mcpServers ?? {}).length;
-    if (mcpServerCount > 0) {
-        await mcpRegistry.start(config.mcpServers);
-    }
-
     // Dry-run: show execution plan and exit
     if (dryRun) {
-        printDryRun(task, config, contextDocs, sourceDocs, auto);
-        return createWorkflowContext(task, config.workflow.maxIterations);
+        printDryRun(task, workflow, config, contextDocs, sourceDocs, auto, maxIterations);
+        return createWorkflowContext(task, workflow.name, firstStep(workflow).id, maxIterations);
     }
 
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
+    console.log(chalk.gray(`Workflow: ${workflow.name}`));
     if (mode) {
         console.log(chalk.blue(`Mode: ${mode}`));
     }
@@ -158,30 +133,25 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         await git.createBranch(branchName);
     }
 
-    // Create workflow context
-    const ctx = createWorkflowContext(task, config.workflow.maxIterations);
-
-    return executeWorkflowLoop({
-        ctx,
+    return runLoop({
+        ctx: createWorkflowContext(task, workflow.name, firstStep(workflow).id, maxIterations),
+        workflow,
         projectRoot: effectiveRoot,
         sourceProjectRoot: projectRoot,
         config,
-        tokenTracker,
-        qaPolicy,
+        qaPolicy: loadQAPolicy(projectRoot),
+        tokenTracker: new TokenTracker(),
         contextDocs,
         sourceDocs,
         auto,
         streaming,
         worktree,
         showSummary,
-        mcpRegistry: mcpRegistry.isActive ? mcpRegistry : undefined,
     });
 }
 
 /**
- * Resume an interrupted or failed workflow from a saved session.
- *
- * Loads the session, restores state, and re-enters the workflow loop.
+ * Resume an interrupted workflow from a saved session.
  */
 export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowContext> {
     const { projectRoot, auto = false, mode, streaming = true } = options;
@@ -204,8 +174,8 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
 
     if (isTerminal(session.context)) {
         throw new WorkflowError(
-            `Session "${sessionId}" is in terminal state "${session.context.state}" and cannot be resumed.`,
-            { sessionId, state: session.context.state },
+            `Session "${sessionId}" already ${session.context.status} and cannot be resumed.`,
+            { sessionId, status: session.context.status },
         );
     }
 
@@ -213,12 +183,10 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
     if (mode) {
         applyModePreset(config, mode);
     }
+    const { definition: workflow } = getWorkflow(projectRoot, session.context.workflow);
 
     const tokenTracker = new TokenTracker();
     tokenTracker.restoreEntries(session.tokenUsage);
-    const qaPolicy = loadQAPolicy(projectRoot);
-    const contextDocs = loadContextDocuments(projectRoot);
-    const sourceDocs = loadLegacySources(projectRoot, config);
 
     // Restore worktree if the session ran in one
     let effectiveRoot = projectRoot;
@@ -276,7 +244,7 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
     logger.header('AI Workflow — Resuming Session');
     console.log(chalk.gray(`Session: ${sessionId}`));
     console.log(chalk.gray(`Task: ${session.context.task}`));
-    console.log(chalk.gray(`Resuming from state: ${session.context.state}`));
+    console.log(chalk.gray(`Workflow: ${workflow.name}, resuming at step "${session.context.step ?? ''}"`));
     if (worktree) {
         console.log(chalk.gray(`Worktree: ${worktree.path}`));
     }
@@ -288,16 +256,17 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
     }
     console.log();
 
-    return executeWorkflowLoop({
+    return runLoop({
         ctx: session.context,
+        workflow,
         sessionId,
         projectRoot: effectiveRoot,
         sourceProjectRoot: projectRoot,
         config,
+        qaPolicy: loadQAPolicy(projectRoot),
         tokenTracker,
-        qaPolicy,
-        contextDocs,
-        sourceDocs,
+        contextDocs: loadContextDocuments(projectRoot),
+        sourceDocs: loadLegacySources(projectRoot, config),
         auto,
         streaming,
         worktree,
@@ -316,15 +285,16 @@ async function resolveBaseBranch(projectRoot: string, branch: string): Promise<s
     return 'main';
 }
 
-// ── Workflow loop ──
+// ── Run loop ──
 
-interface WorkflowLoopParams {
+interface RunLoopParams {
     ctx: WorkflowContext;
+    workflow: WorkflowDefinition;
     sessionId?: string;
     /** Effective project root — may be a worktree path. */
     projectRoot: string;
     /** The original source project root (where sessions/config live). */
-    sourceProjectRoot?: string;
+    sourceProjectRoot: string;
     config: AppConfig;
     tokenTracker: TokenTracker;
     qaPolicy: QAPolicy;
@@ -336,140 +306,44 @@ interface WorkflowLoopParams {
     worktree?: WorktreeInfo;
     /** Print token/cost summary at end of run (default: true). */
     showSummary?: boolean;
-    /** MCP registry to pass tools into agents (started externally). */
-    mcpRegistry?: McpRegistry;
 }
 
 /**
- * Core workflow loop — shared by runWorkflow() and resumeWorkflow().
- *
- * Executes agents in sequence, handles transitions, saves sessions,
- * and applies post-loop logic (auto-commit, summaries).
+ * Shared by runWorkflow() and resumeWorkflow(): start MCP servers, execute
+ * the workflow with session saves, then commit, finish the worktree, and
+ * print summaries.
  */
-async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<WorkflowContext> {
-    const { projectRoot, config, tokenTracker, qaPolicy, contextDocs, sourceDocs, auto, streaming, worktree, showSummary = true, mcpRegistry } = params;
-    const sessionRoot = params.sourceProjectRoot ?? projectRoot;
+async function runLoop(params: RunLoopParams): Promise<WorkflowContext> {
+    const { projectRoot, sourceProjectRoot, config, tokenTracker, worktree, showSummary = true } = params;
     const startedAt = Date.now();
-    let ctx = params.ctx;
-    let sessionId = params.sessionId;
-    let lastOutput = '';
-
     const worktreeMeta = worktree ? { branch: worktree.branch, path: worktree.path } : undefined;
+    let sessionId = params.sessionId;
 
-    try {
-        while (!isTerminal(ctx)) {
-            const agentRole = getNextAgent(ctx);
-
-            if (!agentRole) {
-                if (ctx.state === 'qa_approved') {
-                    logger.success('Workflow complete!');
-                } else {
-                    logger.warn('No agent mapped to current state — stopping.');
-                }
-                break;
-            }
-
-            const spinner = ora(`Running ${agentRole} agent...`).start();
-            const changes = new ChangeSet();
-            const agent = createAgent(agentRole, config, projectRoot, {
-                tools: mcpRegistry?.toolsFor(agentRole),
-                changes,
-                // Pause the spinner while asking, so the prompt stays readable
-                confirmCommand: auto ? undefined : async (command) => {
-                    const spinning = spinner.isSpinning;
-                    spinner.stop();
-                    const answer = await confirmCommand(command);
-                    if (spinning) spinner.start();
-                    return answer;
-                },
-            });
-            const agentConfig = config.agents[agentRole];
-
-            try {
-                const repoMap = !config.workflow.legacyFileBlocks && config.project.repoMapTokens > 0
-                    ? await buildRepoMap(projectRoot, { maxTokens: config.project.repoMapTokens })
-                    : undefined;
-                const agentInput = {
-                    task: ctx.task,
-                    context: buildAgentContext(ctx, config, agentRole, { qaPolicy, contextDocs, sourceDocs, repoMap }),
-                    previousOutput: getLatestOutput(ctx),
-                };
-
-                let output;
-                if (streaming) {
-                    spinner.stop();
-                    const renderer = createStreamRenderer(agentRole);
-                    output = await agent.executeStreaming(agentInput, renderer.callbacks);
-                    renderer.finish();
-                } else {
-                    output = await agent.execute(agentInput);
-                    spinner.succeed(`${agentRole} complete (${output.tokensUsed} tokens)`);
-                }
-                lastOutput = output.content;
-
-                // Track token usage
-                tokenTracker.record(agentRole, agentConfig.model, output.usage);
-
-                // Plan-review gate: pause after architect if configured
-                if (!auto && agentRole === 'architect' && isApprovalGated('architect', config.workflow.approvalGates)) {
-                    const planResult = await requestPlanApproval(output.content, ctx);
-
-                    if (planResult.action === 'abort') {
-                        ctx = transition(ctx, { type: 'ABORT', payload: { reason: 'User aborted after plan review' } });
-                        break;
-                    } else if (planResult.action === 'regenerate') {
-                        // Prepend feedback to next architect input — loop continues naturally
-                        logger.info(`Regenerating plan with feedback: "${planResult.feedback}"`);
-                        ctx = { ...ctx, task: `${ctx.task}\n\n[FEEDBACK]: ${planResult.feedback}` };
-                        continue;
-                    } else if (planResult.action === 'edit') {
-                        // Replace plan output with user-edited version
-                        output = { ...output, content: planResult.plan };
-                        lastOutput = planResult.plan;
-                    }
-                    // 'approve' falls through — apply as-is
-                }
-
-                // Transition based on agent output
-                ctx = await applyAgentOutput(ctx, agentRole, output, config, projectRoot, changes);
-            } catch (err) {
-                spinner.fail(`${agentRole} failed`);
-
-                if (err instanceof WorkflowError) throw err;
-                logger.error(err instanceof Error ? err.message : String(err));
-
-                ctx = transition(ctx, { type: 'ABORT', payload: { reason: String(err) } });
-            }
-
-            // Save session after each step (crash recovery)
-            sessionId = saveSession(sessionRoot, ctx, tokenTracker.getEntries(), sessionId, worktreeMeta);
-
-            // Human approval gate (skipped in autonomous mode)
-            const shouldApprove = !auto && needsApproval(config.workflow.humanApproval, ctx.state);
-            if (shouldApprove && !isTerminal(ctx)) {
-                const decision = await requestApproval(ctx, agentRole!, lastOutput);
-
-                if (decision === 'abort') {
-                    ctx = transition(ctx, { type: 'ABORT', payload: { reason: 'User aborted' } });
-                } else if (decision === 'retry') {
-                    logger.info('Retrying agent...');
-                }
-            }
-        }
-    } catch (err) {
-        logger.error(`Workflow failed: ${err instanceof Error ? err.message : String(err)}`);
-        if (!isTerminal(ctx)) {
-            ctx = transition(ctx, { type: 'ABORT', payload: { reason: String(err) } });
-        }
+    const mcpRegistry = new McpRegistry();
+    if (Object.keys(config.mcpServers ?? {}).length > 0) {
+        await mcpRegistry.start(config.mcpServers);
     }
 
-    // Auto-commit if QA passed and autoCommit is enabled
-    if (config.workflow.autoCommit && ctx.state === 'qa_approved') {
+    let ctx: WorkflowContext;
+    try {
+        ctx = await executeWorkflow({
+            ...params,
+            mcpRegistry: mcpRegistry.isActive ? mcpRegistry : undefined,
+            // Save after each step (crash recovery)
+            onStep: (current) => {
+                sessionId = saveSession(sourceProjectRoot, current, tokenTracker.getEntries(), sessionId, worktreeMeta);
+            },
+        });
+    } finally {
+        mcpRegistry.stop();
+    }
+
+    // Auto-commit if the run passed and autoCommit is enabled
+    if (config.workflow.autoCommit && ctx.status === 'passed') {
         try {
             const git = new GitClient(projectRoot);
             if (await git.isRepo()) {
-                const message = (config.workflow.autoCommitMessage ?? 'ai: {task}')
-                    .replace('{task}', ctx.task);
+                const message = (config.workflow.autoCommitMessage ?? 'ai: {task}').replace('{task}', ctx.task);
                 const hash = await git.commitAll(message);
                 logger.success(`Auto-committed: ${hash}`);
             }
@@ -478,18 +352,12 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
         }
     }
 
-    // Handle worktree merge / show merge instructions
     if (worktree) {
-        await handleWorktreeFinish(worktree, ctx, sessionRoot, config, auto);
+        await handleWorktreeFinish(worktree, ctx, sourceProjectRoot, config, params.auto);
     }
 
-    // Final save
-    saveSession(sessionRoot, ctx, tokenTracker.getEntries(), sessionId, worktreeMeta);
+    saveSession(sourceProjectRoot, ctx, tokenTracker.getEntries(), sessionId, worktreeMeta);
 
-    // Tear down MCP servers
-    mcpRegistry?.stop();
-
-    // Print summaries
     printWorkflowSummary(ctx);
     if (showSummary) {
         tokenTracker.printSummary(Date.now() - startedAt);
@@ -510,7 +378,7 @@ async function handleWorktreeFinish(
     config: AppConfig,
     auto: boolean,
 ): Promise<void> {
-    const passed = ctx.state === 'qa_approved';
+    const passed = ctx.status === 'passed';
     const { branch, baseBranch } = worktree;
 
     const shouldAutoMerge =
@@ -574,55 +442,42 @@ async function handleWorktreeFinish(
 // ── Dry-run ──
 
 /**
- * Print workflow execution plan without calling any agents.
+ * Print the workflow's steps and settings without calling any agents.
  */
 function printDryRun(
     task: string,
+    workflow: WorkflowDefinition,
     config: AppConfig,
     contextDocs: ContextDocument[],
     sourceDocs: ContextDocument[],
     auto: boolean,
+    maxIterations: number,
 ): void {
     logger.header('AI Workflow — Dry Run');
     console.log(chalk.gray(`Task: ${task}`));
+    console.log(chalk.gray(`Workflow: ${workflow.name}${workflow.description ? ` — ${workflow.description}` : ''}`));
     console.log(chalk.gray(`Mode: ${config.workflow.mode}`));
-    console.log(chalk.gray(`Max iterations: ${config.workflow.maxIterations}`));
+    console.log(chalk.gray(`Max iterations: ${maxIterations}`));
     console.log();
 
-    // Show the happy-path agent pipeline
-    const happyPath: { state: string; role: AgentRole; description: string }[] = [
-        { state: 'idle', role: 'architect', description: 'Analyze task and create implementation plan' },
-        { state: 'plan_approved', role: 'coder', description: 'Generate code from the plan' },
-        { state: 'code_generated', role: 'reviewer', description: 'Review generated code' },
-        { state: 'review_done', role: 'security', description: 'Scan for security vulnerabilities' },
-        { state: 'security_checked', role: 'tester', description: 'Write and run tests' },
-        { state: 'tests_passed', role: 'judge', description: 'Final QA verdict' },
-    ];
-
-    console.log(chalk.bold('  Agent Pipeline'));
+    console.log(chalk.bold('  Steps'));
     console.log();
+    workflow.steps.forEach((step, i) => {
+        const agentConfig = config.agents[step.agent];
+        const flags = [
+            step.trigger === 'on-fail' ? 'on fail only' : undefined,
+            step.checks.length > 0 ? `checks: ${step.checks.join(', ')}` : undefined,
+            step.gate ? `gate: ${step.gate}` : undefined,
+            step.onFail ? `on fail → ${step.onFail}` : undefined,
+            step.next ? `next → ${step.next}` : undefined,
+        ].filter(Boolean).join(' | ');
 
-    for (let i = 0; i < happyPath.length; i++) {
-        const step = happyPath[i]!;
-        const agentConfig = config.agents[step.role];
-        const label = AGENT_ROLE_LABELS[step.role];
-
-        console.log(chalk.bold(`  ${i + 1}. ${label}`));
+        console.log(chalk.bold(`  ${i + 1}. ${step.id} — ${AGENT_ROLE_LABELS[step.agent]}`));
         console.log(chalk.gray(`     Provider: ${agentConfig.provider} / ${agentConfig.model}`));
-        console.log(chalk.gray(`     Temperature: ${agentConfig.temperature} | Max tokens: ${agentConfig.maxTokens}`));
-        console.log(chalk.gray(`     ${step.description}`));
+        if (step.description) console.log(chalk.gray(`     ${step.description}`));
+        if (flags) console.log(chalk.gray(`     ${flags}`));
         console.log();
-    }
-
-    // Show fix loops
-    console.log(chalk.bold('  Fix Loops'));
-    console.log();
-
-    const fixerConfig = config.agents.fixer;
-    console.log(chalk.gray(`  If review is rejected or tests fail, the ${AGENT_ROLE_LABELS.fixer} agent retries.`));
-    console.log(chalk.gray(`  Provider: ${fixerConfig.provider} / ${fixerConfig.model}`));
-    console.log(chalk.gray(`  Max iterations: ${config.workflow.maxIterations}`));
-    console.log();
+    });
 
     // Context documents
     if (contextDocs.length > 0) {
@@ -679,19 +534,6 @@ function printDryRun(
 
 // ── Private helpers ──
 
-/** Full source files for prompts, only needed in legacyFileBlocks mode. */
-function loadLegacySources(projectRoot: string, config: AppConfig): ContextDocument[] {
-    return config.workflow.legacyFileBlocks ? loadSourceFiles(projectRoot, config.project.sourceGlobs) : [];
-}
-
-/** Resolve the test command from config, falling back to auto-detected defaults. */
-function getTestCommand(config: AppConfig, projectRoot: string): string {
-    if (config.workflow.testCommand) {
-        return config.workflow.testCommand;
-    }
-    return buildTestCommand(config.project.testFramework, projectRoot);
-}
-
 /** Apply a workflow mode preset to the config, overriding relevant fields. */
 function applyModePreset(config: AppConfig, mode: string): void {
     const validModes = Object.keys(WORKFLOW_PRESETS);
@@ -716,228 +558,9 @@ function applyModePreset(config: AppConfig, mode: string): void {
     }
 }
 
-/** Build context string for the current agent based on workflow state. */
-function buildAgentContext(
-    ctx: WorkflowContext,
-    config: AppConfig,
-    agentRole: string,
-    sources: { qaPolicy?: QAPolicy; contextDocs?: ContextDocument[]; sourceDocs?: ContextDocument[]; repoMap?: string },
-): string {
-    const { qaPolicy, contextDocs, sourceDocs, repoMap } = sources;
-    const parts: string[] = [];
-
-    // Inject project settings so agents know the language, framework, and test tools
-    parts.push([
-        '## Project Settings',
-        `- Language: ${config.project.language}`,
-        `- Framework: ${config.project.framework}`,
-        `- Test framework: ${config.project.testFramework}`,
-        '',
-        'IMPORTANT: All code MUST be written in the language and framework specified above.',
-    ].join('\n'));
-
-    // Inject reference documents so all agents see them
-    if (contextDocs && contextDocs.length > 0) {
-        parts.push(formatContextForAgent(contextDocs));
-    }
-
-    // Agents with read tools get a map and fetch code on demand
-    if (repoMap) {
-        parts.push(repoMap);
-    }
-
-    // Legacy mode: code agents have no read tools, so inline the sources
-    const codeAgents = ['coder', 'fixer', 'tester'];
-    if (sourceDocs && sourceDocs.length > 0 && codeAgents.includes(agentRole)) {
-        parts.push(formatSourcesForAgent(sourceDocs));
-    }
-
-    if (ctx.spec) parts.push(`## Spec\n${ctx.spec}`);
-    if (ctx.plan) parts.push(`## Plan\n${ctx.plan}`);
-    if (ctx.reviewFeedback) parts.push(`## Review Feedback\n${ctx.reviewFeedback}`);
-    if (ctx.securityFindings) parts.push(`## Security Findings\n${ctx.securityFindings}`);
-    if (ctx.testFailures) parts.push(`## Test Failures\n${ctx.testFailures}`);
-    if (ctx.generatedFiles.length > 0) {
-        parts.push(`## Modified Files\n${ctx.generatedFiles.join('\n')}`);
-    }
-
-    // Include QA policy for the judge agent
-    if (qaPolicy && ctx.state === 'tests_passed') {
-        parts.push(formatPolicyForAgent(qaPolicy));
-    }
-
-    return parts.join('\n\n');
-}
-
-/** Get the most recent output relevant to the next agent. */
-function getLatestOutput(ctx: WorkflowContext): string | undefined {
-    if (ctx.spec && ctx.state === 'spec_created') return ctx.spec;
-    if (ctx.plan && ctx.state === 'plan_approved') return ctx.plan;
-    if (ctx.reviewFeedback) return ctx.reviewFeedback;
-    if (ctx.testFailures) return ctx.testFailures;
-    return undefined;
-}
-
-/**
- * Apply an agent's output to the workflow context via state transition.
- */
-async function applyAgentOutput(
-    ctx: WorkflowContext,
-    role: AgentRole,
-    output: AgentOutput,
-    config: AppConfig,
-    projectRoot: string,
-    changes: ChangeSet,
-): Promise<WorkflowContext> {
-    const { content } = output;
-    switch (role) {
-        case 'architect':
-            if (ctx.state === 'idle') {
-                ctx = transition(ctx, { type: 'SPEC_READY', payload: { spec: content } });
-                ctx = transition(ctx, { type: 'PLAN_APPROVED', payload: { plan: content } });
-            }
-            return ctx;
-
-        case 'coder': {
-            const files = collectChangedFiles(changes, content, projectRoot, config);
-
-            // Format silently, then lint as a gate
-            if (config.workflow.formatCommand) {
-                await runFormat(projectRoot, config.workflow.formatCommand);
-            }
-            if (config.workflow.lintCommand) {
-                const lintResult = await runLint(projectRoot, config.workflow.lintCommand);
-                if (!lintResult.passed) {
-                    if (isRepeatedFailure(lintResult.output, ctx.previousFailures)) {
-                        logger.warn('Repeated lint failure — fixer could not resolve lint errors. Continuing.');
-                    } else {
-                        ctx.previousFailures.push(lintResult.output);
-                        ctx = transition(ctx, { type: 'CODE_GENERATED', payload: { files: files.length > 0 ? files : ['(no files parsed)'] } });
-                        return transition(ctx, { type: 'TESTS_FAILED', payload: { failures: `Lint errors:\n${lintResult.output}` } });
-                    }
-                }
-            }
-
-            return transition(ctx, {
-                type: 'CODE_GENERATED',
-                payload: { files: files.length > 0 ? files : ['(no files parsed)'] },
-            });
-        }
-
-        case 'reviewer': {
-            const verdict = requireVerdict(output, role);
-            logIssueCounts('Review', verdict);
-            ctx = transition(ctx, { type: 'REVIEW_DONE', payload: { approved: isPositive(verdict), feedback: content } });
-            return withVerdict(ctx, role, verdict);
-        }
-
-        case 'security': {
-            const verdict = requireVerdict(output, role);
-            const passed = isPositive(verdict);
-            if (!passed) {
-                logger.warn('Security review found issues — routing to Fixer.');
-            }
-            ctx = transition(ctx, { type: 'SECURITY_CHECKED', payload: { passed, findings: content } });
-            return withVerdict(ctx, role, verdict);
-        }
-
-        case 'tester': {
-            const testFiles = collectChangedFiles(changes, content, projectRoot, config);
-            ctx = transition(ctx, {
-                type: 'TESTS_WRITTEN',
-                payload: { testFiles: testFiles.length > 0 ? testFiles : ['(no test files parsed)'] },
-            });
-
-            // Auto-run tests and transition based on results
-            if (config.workflow.autoRunTests) {
-                const testResult = await runTests(projectRoot, getTestCommand(config, projectRoot));
-                if (testResult.passed) {
-                    ctx = transition(ctx, { type: 'TESTS_PASSED' });
-                } else {
-                    // Detect repeated failures — break infinite fix loops
-                    if (isRepeatedFailure(testResult.output, ctx.previousFailures)) {
-                        logger.warn('Repeated test failure detected — same errors after fix attempt. Stopping.');
-                        ctx = transition(ctx, { type: 'ABORT', payload: { reason: 'Repeated test failure — fixer could not resolve the issue' } });
-                    } else {
-                        ctx.previousFailures.push(testResult.output);
-                        ctx = transition(ctx, { type: 'TESTS_FAILED', payload: { failures: testResult.output } });
-                    }
-                }
-            } else {
-                // Skip test execution — assume tests pass
-                ctx = transition(ctx, { type: 'TESTS_PASSED' });
-            }
-
-            return ctx;
-        }
-
-        case 'fixer': {
-            const fixedFiles = collectChangedFiles(changes, content, projectRoot, config);
-
-            // Re-format after fixes
-            if (config.workflow.formatCommand) {
-                await runFormat(projectRoot, config.workflow.formatCommand);
-            }
-
-            ctx = transition(ctx, {
-                type: 'FIX_APPLIED',
-                payload: { files: fixedFiles.length > 0 ? fixedFiles : ['(no files parsed)'] },
-            });
-            // Auto-transition back to code_generated for re-review
-            return transition(ctx, {
-                type: 'CODE_GENERATED',
-                payload: { files: fixedFiles.length > 0 ? fixedFiles : ['(no files parsed)'] },
-            });
-        }
-
-        case 'judge': {
-            const verdict = requireVerdict(output, role);
-            ctx = isPositive(verdict)
-                ? transition(ctx, { type: 'QA_APPROVED' })
-                : transition(ctx, { type: 'QA_REJECTED', payload: { reason: content } });
-            return withVerdict(ctx, role, verdict);
-        }
-
-        default:
-            return ctx;
-    }
-}
-
-/** The structured verdict a judging agent attached to its output. */
-function requireVerdict(output: AgentOutput, role: VerdictRole): Verdict {
-    const verdict = output.metadata?.verdict as Verdict | undefined;
-    if (!verdict) {
-        throw new WorkflowError(`${AGENT_ROLE_LABELS[role]} produced no verdict`, { role });
-    }
-    return verdict;
-}
-
-function withVerdict(ctx: WorkflowContext, role: VerdictRole, verdict: Verdict): WorkflowContext {
-    return { ...ctx, verdicts: { ...ctx.verdicts, [role]: verdict } };
-}
-
-function logIssueCounts(label: string, verdict: Verdict): void {
-    if (verdict.issues.length === 0) return;
-    const counts = new Map<string, number>();
-    for (const issue of verdict.issues) counts.set(issue.severity, (counts.get(issue.severity) ?? 0) + 1);
-    logger.info(`${label}: ${[...counts].map(([sev, n]) => `${n} ${sev}`).join(', ')}`);
-}
-
-/**
- * Files a code-writing agent changed during its step.
- *
- * Normally these are the files it edited through tools. If it made no tool
- * edits but replied with `FILE:` blocks (legacy mode, or a model that ignores
- * tools), those blocks are written instead.
- */
-function collectChangedFiles(changes: ChangeSet, content: string, projectRoot: string, config: AppConfig): string[] {
-    if (changes.size > 0) return changes.files;
-
-    const written = parseAndWriteFiles(projectRoot, content);
-    if (written.length > 0 && !config.workflow.legacyFileBlocks) {
-        logger.warn('Agent replied with FILE: blocks instead of editing through tools; wrote them anyway.');
-    }
-    return written;
+/** Full source files for prompts, only needed in legacyFileBlocks mode. */
+function loadLegacySources(projectRoot: string, config: AppConfig): ContextDocument[] {
+    return config.workflow.legacyFileBlocks ? loadSourceFiles(projectRoot, config.project.sourceGlobs) : [];
 }
 
 /** Print a colored summary of the workflow execution. */
@@ -945,9 +568,9 @@ function printWorkflowSummary(ctx: WorkflowContext): void {
     console.log();
     logger.header('Workflow Summary');
     console.log(chalk.gray(`Task: ${ctx.task}`));
-    console.log(chalk.gray(`Final state: ${ctx.state}`));
+    console.log(chalk.gray(`Workflow: ${ctx.workflow}`));
+    console.log(chalk.gray(`Status: ${ctx.status}`));
     console.log(chalk.gray(`Iterations: ${ctx.iteration}/${ctx.maxIterations}`));
-    console.log(chalk.gray(`Steps: ${ctx.history.length}`));
 
     if (ctx.generatedFiles.length > 0) {
         console.log();
@@ -959,82 +582,20 @@ function printWorkflowSummary(ctx: WorkflowContext): void {
 
     if (ctx.history.length > 0) {
         console.log();
-        console.log(chalk.bold('  State transitions:'));
-        for (const step of ctx.history) {
-            const arrow = step.to === 'failed' ? chalk.red('→') : chalk.green('→');
-            console.log(chalk.gray(`    ${step.from} ${arrow} ${chalk.white(step.to)} (${step.event})`));
+        console.log(chalk.bold('  Steps:'));
+        for (const record of ctx.history) {
+            const mark = record.outcome === 'passed' ? chalk.green('✓') : record.outcome === 'failed' ? chalk.yellow('↺') : chalk.red('✗');
+            const detail = record.detail ? chalk.gray(` — ${record.detail}`) : '';
+            console.log(`    ${mark} ${record.step}${detail}`);
         }
     }
 
     console.log();
-    if (ctx.state === 'complete' || ctx.state === 'qa_approved') {
+    if (ctx.status === 'passed') {
         logger.success('Task completed successfully!');
-    } else if (ctx.state === 'failed') {
-        logger.error('Task failed.');
+    } else if (ctx.status === 'failed') {
+        logger.error(`Task failed${ctx.failureReason ? `: ${ctx.failureReason}` : '.'}`);
     } else {
-        logger.warn(`Task stopped in state: ${ctx.state}`);
+        logger.warn(`Task stopped at step "${ctx.step ?? ''}"`);
     }
-}
-
-/**
- * Check if a test failure output matches any previous failure.
- *
- * Uses two strategies:
- * 1. Error signature match — extracts error types/messages and compares
- * 2. Line-level similarity — if >50% of meaningful lines match, it's a repeat
- */
-function isRepeatedFailure(current: string, previous: string[]): boolean {
-    if (previous.length === 0) return false;
-
-    const currentErrors = extractErrorSignatures(current);
-    const currentLines = normalizeLines(current);
-
-    for (const prev of previous) {
-        // Strategy 1: same error signatures
-        const prevErrors = extractErrorSignatures(prev);
-        if (currentErrors.length > 0 && prevErrors.length > 0) {
-            const overlap = currentErrors.filter((e) => prevErrors.includes(e)).length;
-            if (overlap / Math.max(currentErrors.length, prevErrors.length) > 0.5) return true;
-        }
-
-        // Strategy 2: line-level similarity
-        const prevLines = normalizeLines(prev);
-        if (currentLines.length > 0 && prevLines.length > 0) {
-            const matched = currentLines.filter((line) => prevLines.includes(line)).length;
-            const similarity = matched / Math.max(currentLines.length, prevLines.length);
-            if (similarity > 0.5) return true;
-        }
-    }
-
-    return false;
-}
-
-/** Extract error type/message signatures from test output. */
-function extractErrorSignatures(output: string): string[] {
-    const patterns = [
-        /(?:Error|FAIL|panic|undefined|cannot).*$/gmi,
-        /expected .+ got .+/gi,
-        /no such file or directory/gi,
-    ];
-    const signatures: string[] = [];
-    for (const pattern of patterns) {
-        for (const match of output.matchAll(pattern)) {
-            // Normalize: trim, lowercase, strip paths and line numbers
-            const sig = match[0].trim().toLowerCase()
-                .replace(/\b\d+\b/g, 'N')
-                .replace(/\/[\w./]+/g, '<path>');
-            signatures.push(sig);
-        }
-    }
-    return [...new Set(signatures)];
-}
-
-/** Normalize test output lines for comparison — trim, drop noise. */
-function normalizeLines(output: string): string[] {
-    return output
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0)
-        .filter((l) => !/^\d{4}-\d{2}-\d{2}/.test(l))  // drop timestamp lines
-        .filter((l) => !/^(ok|PASS|\?)/.test(l));        // drop pass/skip lines
 }
