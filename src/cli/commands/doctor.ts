@@ -103,10 +103,10 @@ export async function checkModels(
 function checkNodeVersion(): CheckResult {
     const version = process.versions.node;
     const major = parseInt(version.split('.')[0]!, 10);
-    if (major >= 20) {
+    if (major >= 22) {
         return pass(`Node.js v${version}`);
     }
-    return fail(`Node.js v${version}`, 'Requires Node.js >= 20.0.0');
+    return fail(`Node.js v${version}`, 'Requires Node.js >= 22.0.0');
 }
 
 /** Check if git is available. */
