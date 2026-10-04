@@ -30,6 +30,9 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           git tag "v$VERSION"
           git push origin "v$VERSION"
+          # Versions like 2.0.0-alpha.1 become GitHub prereleases (published to npm "next")
+          PRERELEASE=""
+          case "$VERSION" in *-*) PRERELEASE="--prerelease" ;; esac
           gh release create "v$VERSION" \
             --title "v$VERSION" \
-            --generate-notes
+            --generate-notes $PRERELEASE

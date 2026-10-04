@@ -15,6 +15,19 @@ on:
           - patch
           - minor
           - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+      preid:
+        description: 'Prerelease identifier (only used by pre* bumps)'
+        required: false
+        default: 'alpha'
+        type: choice
+        options:
+          - alpha
+          - beta
+          - rc
 
 jobs:
   bump:
@@ -42,6 +55,7 @@ jobs:
       - name: Run checks
         run: |
           npm run typecheck
+          npm run lint
           npm run build
           npm test
 
@@ -49,7 +63,7 @@ jobs:
         id: bump
         run: |
           OLD=$(node -p "require('./package.json').version")
-          npm version ${{ inputs.bump }} --no-git-tag-version
+          npm version ${{ inputs.bump }} --preid ${{ inputs.preid }} --no-git-tag-version
           NEW=$(node -p "require('./package.json').version")
           echo "old=$OLD" >> $GITHUB_OUTPUT
           echo "new=$NEW" >> $GITHUB_OUTPUT

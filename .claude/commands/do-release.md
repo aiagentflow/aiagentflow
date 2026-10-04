@@ -16,8 +16,12 @@ If the user did not pass an argument, ask:
 > - `patch` — bug fixes only (0.9.0 → 0.9.1)
 > - `minor` — new features, backward-compatible (0.9.0 → 0.10.0)
 > - `major` — breaking changes (0.9.0 → 1.0.0)
+> - `premajor` — first prerelease of the next major (1.4.0 → 2.0.0-alpha.0)
+> - `prerelease` — next prerelease (2.0.0-alpha.0 → 2.0.0-alpha.1; with `preid=beta` → 2.0.0-beta.0)
 
-Use the argument directly if provided: `/release patch`, `/release minor`, `/release major`.
+Use the argument directly if provided: `/release patch`, `/release minor`, `/release major`, `/release premajor alpha`.
+
+Prerelease versions (anything with `-`) become GitHub prereleases and publish to the npm `next` dist-tag, so `npm i @aiagentflow/cli` keeps installing the latest stable version. Install a prerelease with `npm i @aiagentflow/cli@next`.
 
 ## Step 2 — Verify you are on main and clean
 
@@ -42,7 +46,7 @@ Wait for confirmation before continuing.
 ## Step 4 — Trigger the Release workflow
 
 ```bash
-gh workflow run release.yml --field bump=<patch|minor|major>
+gh workflow run release.yml --field bump=<patch|minor|major|premajor|prerelease> [--field preid=<alpha|beta|rc>]
 ```
 
 Then watch the run start:
