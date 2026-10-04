@@ -45,6 +45,7 @@ import { WorkflowError } from '../errors.js';
 import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
 import { confirmCommand } from '../../cli/utils/confirm-command.js';
 import { ChangeSet } from '../../tools/repo.js';
+import { buildRepoMap } from './repo-map.js';
 
 export interface RunOptions {
     /** Project root directory. */
@@ -106,7 +107,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     const tokenTracker = new TokenTracker();
     const qaPolicy = loadQAPolicy(projectRoot);
     const contextDocs = loadContextDocuments(projectRoot, contextPaths);
-    const sourceDocs = loadSourceFiles(projectRoot, config.project.sourceGlobs);
+    const sourceDocs = loadLegacySources(projectRoot, config);
 
     // Start MCP servers if configured
     const mcpRegistry = new McpRegistry();
@@ -215,7 +216,7 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
     tokenTracker.restoreEntries(session.tokenUsage);
     const qaPolicy = loadQAPolicy(projectRoot);
     const contextDocs = loadContextDocuments(projectRoot);
-    const sourceDocs = loadSourceFiles(projectRoot, config.project.sourceGlobs);
+    const sourceDocs = loadLegacySources(projectRoot, config);
 
     // Restore worktree if the session ran in one
     let effectiveRoot = projectRoot;
@@ -383,9 +384,12 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
             const agentConfig = config.agents[agentRole];
 
             try {
+                const repoMap = !config.workflow.legacyFileBlocks && config.project.repoMapTokens > 0
+                    ? await buildRepoMap(projectRoot, { maxTokens: config.project.repoMapTokens })
+                    : undefined;
                 const agentInput = {
                     task: ctx.task,
-                    context: buildAgentContext(ctx, config, agentRole, qaPolicy, contextDocs, sourceDocs),
+                    context: buildAgentContext(ctx, config, agentRole, { qaPolicy, contextDocs, sourceDocs, repoMap }),
                     previousOutput: getLatestOutput(ctx),
                 };
 
@@ -631,7 +635,15 @@ function printDryRun(
         console.log();
     }
 
-    // Source files
+    if (!config.workflow.legacyFileBlocks) {
+        console.log(chalk.bold('  Repository Map'));
+        console.log(chalk.gray(config.project.repoMapTokens > 0
+            ? `    Up to ~${config.project.repoMapTokens} tokens of file tree and symbols; agents read files on demand`
+            : '    Disabled (project.repoMapTokens = 0)'));
+        console.log();
+    }
+
+    // Source files (legacy mode only)
     if (sourceDocs.length > 0) {
         console.log(chalk.bold('  Source Files'));
         console.log(chalk.gray(`    ${sourceDocs.length} file(s) matching ${config.project.sourceGlobs.join(', ')}`));
@@ -668,6 +680,11 @@ function printDryRun(
 }
 
 // ── Private helpers ──
+
+/** Full source files for prompts, only needed in legacyFileBlocks mode. */
+function loadLegacySources(projectRoot: string, config: AppConfig): ContextDocument[] {
+    return config.workflow.legacyFileBlocks ? loadSourceFiles(projectRoot, config.project.sourceGlobs) : [];
+}
 
 /** Resolve the test command from config, falling back to auto-detected defaults. */
 function getTestCommand(config: AppConfig, projectRoot: string): string {
@@ -706,10 +723,9 @@ function buildAgentContext(
     ctx: WorkflowContext,
     config: AppConfig,
     agentRole: string,
-    qaPolicy?: QAPolicy,
-    contextDocs?: ContextDocument[],
-    sourceDocs?: ContextDocument[],
+    sources: { qaPolicy?: QAPolicy; contextDocs?: ContextDocument[]; sourceDocs?: ContextDocument[]; repoMap?: string },
 ): string {
+    const { qaPolicy, contextDocs, sourceDocs, repoMap } = sources;
     const parts: string[] = [];
 
     // Inject project settings so agents know the language, framework, and test tools
@@ -727,7 +743,12 @@ function buildAgentContext(
         parts.push(formatContextForAgent(contextDocs));
     }
 
-    // Inject existing source files for agents that generate code
+    // Agents with read tools get a map and fetch code on demand
+    if (repoMap) {
+        parts.push(repoMap);
+    }
+
+    // Legacy mode: code agents have no read tools, so inline the sources
     const codeAgents = ['coder', 'fixer', 'tester'];
     if (sourceDocs && sourceDocs.length > 0 && codeAgents.includes(agentRole)) {
         parts.push(formatSourcesForAgent(sourceDocs));
