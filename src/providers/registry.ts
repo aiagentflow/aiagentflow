@@ -87,8 +87,20 @@ const PROVIDER_FACTORIES: Record<LLMProviderName, (config: ProviderConfig) => LL
     },
 };
 
+/** Providers contributed by plugins, keyed by name. */
+const externalFactories = new Map<string, (config: Record<string, unknown>) => LLMProvider>();
+
+/**
+ * Register a provider from outside the built-ins (a plugin).
+ * Its config is `providers.<name>` from the config file (an empty object if absent).
+ */
+export function registerExternalProvider(name: string, factory: (config: Record<string, unknown>) => LLMProvider): void {
+    externalFactories.set(name, factory);
+    providerCache.delete(name);
+}
+
 /** Cache of created provider instances (one per provider name). */
-const providerCache = new Map<LLMProviderName, LLMProvider>();
+const providerCache = new Map<string, LLMProvider>();
 
 /**
  * Create (or return cached) a provider instance by name.
@@ -98,21 +110,25 @@ const providerCache = new Map<LLMProviderName, LLMProvider>();
  * @returns An LLMProvider instance
  * @throws {ProviderError} if the provider name is unknown or config is missing
  */
-export function createProvider(name: LLMProviderName, config: ProviderConfig): LLMProvider {
+export function createProvider(name: string, config: ProviderConfig): LLMProvider {
     // Return cached instance if available
     const cached = providerCache.get(name);
     if (cached) return cached;
 
-    const factory = PROVIDER_FACTORIES[name];
-    if (!factory) {
+    const builtIn = PROVIDER_FACTORIES[name as LLMProviderName];
+    const external = externalFactories.get(name);
+    if (!builtIn && !external) {
+        const available = [...Object.keys(PROVIDER_FACTORIES), ...externalFactories.keys()];
         throw new ProviderError(
-            `Unknown provider: "${name}". Available: ${Object.keys(PROVIDER_FACTORIES).join(', ')}`,
-            { provider: name, available: Object.keys(PROVIDER_FACTORIES) },
+            `Unknown provider: "${name}". Available: ${available.join(', ')}. Plugin providers need their plugin installed.`,
+            { provider: name, available },
         );
     }
 
     logger.debug(`Creating provider: ${name}`);
-    const provider = factory(config);
+    const provider = builtIn
+        ? builtIn(config)
+        : external!(((config as Record<string, unknown>)[name] as Record<string, unknown> | undefined) ?? {});
     providerCache.set(name, provider);
     return provider;
 }

@@ -1,73 +1,103 @@
 /**
- * Tests for plugin loader validation logic.
+ * Tests for plugin API v2: validation, loading, and the registry.
  */
 
-import { describe, it, expect } from 'vitest';
-import { RESERVED_AGENT_ROLES, RESERVED_PROVIDER_NAMES } from '../../src/plugins/types.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { loadPlugin, validatePlugin } from '../../src/plugins/loader.js';
+import { PluginRegistry } from '../../src/plugins/registry.js';
+import { createProvider, clearProviderCache } from '../../src/providers/registry.js';
+import type { PluginExports } from '../../src/plugins/types.js';
 
-describe('Plugin reserved names', () => {
-    it('reserved agent roles includes all built-in roles', () => {
-        const expected = ['architect', 'coder', 'reviewer', 'security', 'tester', 'fixer', 'judge'];
-        for (const role of expected) {
-            expect(RESERVED_AGENT_ROLES).toContain(role);
-        }
+const manifest = { name: 'demo', version: '1.0.0', apiVersion: 2 as const };
+const tool = (name: string) => ({ definition: { name, description: name, inputSchema: { type: 'object' } }, execute: async () => 'ok' });
+
+describe('validatePlugin', () => {
+    it('accepts a v2 plugin with tools, providers, and steps', () => {
+        expect(() => validatePlugin({
+            manifest,
+            tools: [tool('count_todos')],
+            providers: [{ name: 'echo', create: () => ({}) as never }],
+            steps: [{ name: 'no-todos', run: async () => ({ passed: true, summary: '' }) }],
+        })).not.toThrow();
     });
 
-    it('reserved provider names includes all built-in providers', () => {
-        const expected = ['anthropic', 'openai', 'gemini', 'groq', 'ollama', 'openrouter'];
-        for (const name of expected) {
-            expect(RESERVED_PROVIDER_NAMES).toContain(name);
-        }
-    });
-
-    it('custom role names do not clash with reserved roles', () => {
-        const customRoles = ['linter', 'performance-analyst', 'doc-writer'];
-        for (const role of customRoles) {
-            expect(RESERVED_AGENT_ROLES).not.toContain(role);
-        }
-    });
-});
-
-describe('PluginRegistry', () => {
-    it('returns empty contributions with no plugins loaded', async () => {
-        const { PluginRegistry } = await import('../../src/plugins/registry.js');
-        const registry = new PluginRegistry();
-        // No load() call — should return empty arrays
-        expect(registry.getAgents()).toHaveLength(0);
-        expect(registry.getProviders()).toHaveLength(0);
-        expect(registry.pluginCount).toBe(0);
-    });
-
-    it('getAgent returns undefined for unknown role', async () => {
-        const { PluginRegistry } = await import('../../src/plugins/registry.js');
-        const registry = new PluginRegistry();
-        expect(registry.getAgent('nonexistent')).toBeUndefined();
-    });
-
-    it('getProvider returns undefined for unknown name', async () => {
-        const { PluginRegistry } = await import('../../src/plugins/registry.js');
-        const registry = new PluginRegistry();
-        expect(registry.getProvider('nonexistent')).toBeUndefined();
+    it.each([
+        [{ manifest: { name: 'demo', version: '1', type: 'agent' } }, /apiVersion must be 2\. This looks like a v1 plugin/],
+        [{ manifest, agents: [] }, /"agents" is a v1 contribution/],
+        [{ manifest, tools: [tool('read_file')] }, /tool "read_file" is built in/],
+        [{ manifest, tools: [tool('submit_verdict')] }, /tool "submit_verdict" is built in/],
+        [{ manifest, providers: [{ name: 'openai', create: () => ({}) }] }, /provider "openai" is built in/],
+        [{ manifest, steps: [{ name: 'Bad Name', run: async () => ({}) }] }, /lowercase name/],
+        [{ manifest: { ...manifest, name: 'Has Spaces' } }, /lowercase "name"/],
+    ])('rejects %#', (exports, message) => {
+        expect(() => validatePlugin(exports as unknown as Partial<PluginExports>)).toThrow(message);
     });
 });
 
-describe('loadPlugin from a local path', () => {
-    it('reads package.json and imports the ESM entry', async () => {
-        const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
-        const { join } = await import('node:path');
-        const { tmpdir } = await import('node:os');
-        const { loadPlugin } = await import('../../src/plugins/loader.js');
+describe('loading and the registry', () => {
+    let root: string;
 
-        const dir = mkdtempSync(join(tmpdir(), 'aiagentflow-plugin-'));
-        try {
-            writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', type: 'module', main: 'index.js' }));
-            writeFileSync(join(dir, 'index.js'), 'export const manifest = { name: "p", version: "1.0.0", type: "agent" };\n');
+    beforeEach(() => {
+        root = mkdtempSync(join(tmpdir(), 'aiagentflow-plugin-'));
+        clearProviderCache();
+    });
+    afterEach(() => {
+        clearProviderCache();
+        rmSync(root, { recursive: true, force: true });
+    });
 
-            const plugin = await loadPlugin(dir);
-            expect(plugin?.manifest.name).toBe('p');
-            expect(plugin?.path).toBe(dir);
-        } finally {
-            rmSync(dir, { recursive: true, force: true });
-        }
+    function writePlugin(dir: string, source: string) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', type: 'module', main: 'index.js' }));
+        writeFileSync(join(dir, 'index.js'), source);
+    }
+
+    it('loads a plugin from a local path', async () => {
+        const dir = join(root, 'local');
+        writePlugin(dir, 'export const manifest = { name: "local", version: "1.0.0", apiVersion: 2 };\n');
+        const plugin = await loadPlugin(dir);
+        expect(plugin).toMatchObject({ manifest: { name: 'local' }, tools: [], providers: [], steps: [], path: dir });
+    });
+
+    it('exposes tools by role, steps by reference, and registers providers', async () => {
+        writePlugin(join(root, '.aiagentflow', 'plugins', 'demo'), `
+            export const manifest = { name: 'demo', version: '1.0.0', apiVersion: 2 };
+            export const tools = [
+                { definition: { name: 'everyone', description: '', inputSchema: {} }, execute: async () => '' },
+                { definition: { name: 'coders_only', description: '', inputSchema: {} }, roles: ['coder'], execute: async () => '' },
+            ];
+            export const steps = [{ name: 'check', run: async () => ({ passed: true, summary: 'ok' }) }];
+            export const providers = [{
+                name: 'echo',
+                create: (config) => ({
+                    name: 'echo',
+                    chat: async () => ({ content: config.greeting ?? 'hi', model: 'echo', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, finishReason: 'stop', stopReason: 'end_turn', toolCalls: [] }),
+                    async *stream() {},
+                    listModels: async () => [],
+                    validateConnection: async () => true,
+                }),
+            }];
+        `);
+
+        const registry = new PluginRegistry();
+        await registry.load(root);
+
+        expect(registry.pluginCount).toBe(1);
+        expect(registry.toolsFor('coder').map(t => t.definition.name)).toEqual(['everyone', 'coders_only']);
+        expect(registry.toolsFor('reviewer').map(t => t.definition.name)).toEqual(['everyone']);
+        expect(registry.step('demo/check')?.name).toBe('check');
+        expect(registry.step('demo/missing')).toBeUndefined();
+        expect(registry.stepRefs()).toEqual(['demo/check']);
+
+        // The plugin provider is created from providers.<name> in the config
+        const echo = createProvider('echo', { echo: { greeting: 'hello from config' } } as never);
+        expect((await echo.chat([{ role: 'user', content: 'x' }])).content).toBe('hello from config');
+    });
+
+    it('reports unknown providers with the available names', () => {
+        expect(() => createProvider('nope', {} as never)).toThrow(/Unknown provider: "nope"\. Available: anthropic, gemini/);
     });
 });

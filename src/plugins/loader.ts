@@ -2,8 +2,8 @@
  * Plugin loader — resolves and validates plugin modules.
  *
  * Plugins live in `.aiagentflow/plugins/` (local) or can be installed
- * npm packages. The loader imports them, validates the manifest, and
- * checks for name collisions with built-in roles/providers.
+ * npm packages. The loader imports them, validates the manifest and
+ * contributions, and checks for collisions with built-in tools and providers.
  *
  * Dependency direction: plugins/loader.ts → plugins/types, utils/logger
  * Used by: plugins/registry.ts
@@ -15,7 +15,10 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { logger } from '../utils/logger.js';
 import type { PluginExports, LoadedPlugin } from './types.js';
-import { RESERVED_AGENT_ROLES, RESERVED_PROVIDER_NAMES } from './types.js';
+import { PLUGIN_API_VERSION, RESERVED_PROVIDER_NAMES } from './types.js';
+import { BUILTIN_TOOL_NAMES } from '../tools/permissions.js';
+import { REMEMBER_TOOL_NAME } from '../memory/tool.js';
+import { VERDICT_TOOL_NAME } from '../agents/verdicts.js';
 
 const PLUGINS_DIR = '.aiagentflow/plugins';
 
@@ -74,7 +77,7 @@ export async function loadPlugin(pluginPathOrPackage: string): Promise<LoadedPlu
         throw new Error(`Plugin at "${entryPath}" does not export a "manifest" object`);
     }
 
-    validateManifest(exports);
+    validatePlugin(exports);
 
     const pluginDir = pluginPathOrPackage.startsWith('/') || pluginPathOrPackage.startsWith('.')
         ? pluginPathOrPackage
@@ -82,41 +85,59 @@ export async function loadPlugin(pluginPathOrPackage: string): Promise<LoadedPlu
 
     return {
         manifest: exports.manifest,
-        agents: exports.agents ?? [],
+        tools: exports.tools ?? [],
         providers: exports.providers ?? [],
+        steps: exports.steps ?? [],
         path: pluginDir,
     };
 }
 
-function validateManifest(exports: Partial<PluginExports>): void {
-    const manifest = exports.manifest!;
+/** Tool names owned by aiagentflow; plugin tools cannot reuse them. */
+const RESERVED_TOOL_NAMES: readonly string[] = [...BUILTIN_TOOL_NAMES, REMEMBER_TOOL_NAME, VERDICT_TOOL_NAME];
 
-    if (!manifest.name || typeof manifest.name !== 'string') {
-        throw new Error('Plugin manifest must have a "name" string field');
+/**
+ * Check a plugin's manifest and contributions.
+ * @throws {Error} describing the first problem found
+ */
+export function validatePlugin(exports: Partial<PluginExports>): void {
+    const manifest = exports.manifest!;
+    const name = typeof manifest.name === 'string' ? manifest.name : '(unnamed)';
+
+    if (!manifest.name || typeof manifest.name !== 'string' || !/^[a-z0-9@][a-z0-9@/._-]*$/.test(manifest.name)) {
+        throw new Error('Plugin manifest must have a lowercase "name" (letters, digits, @ / . _ -)');
     }
     if (!manifest.version || typeof manifest.version !== 'string') {
-        throw new Error('Plugin manifest must have a "version" string field');
+        throw new Error(`Plugin "${name}": manifest must have a "version" string`);
     }
-    if (!['agent', 'provider', 'both'].includes(manifest.type)) {
-        throw new Error('Plugin manifest "type" must be "agent", "provider", or "both"');
+    if (manifest.apiVersion !== PLUGIN_API_VERSION) {
+        const v1 = 'type' in manifest ? ' This looks like a v1 plugin (manifest.type, agents with "after"): v2 plugins contribute tools, providers, and workflow steps.' : '';
+        throw new Error(`Plugin "${name}": manifest.apiVersion must be ${PLUGIN_API_VERSION}.${v1}`);
+    }
+    if ('agents' in exports) {
+        throw new Error(`Plugin "${name}": "agents" is a v1 contribution. Use a workflow step (steps) or a tool (tools) instead.`);
     }
 
-    // Check for name collisions
-    for (const agent of exports.agents ?? []) {
-        if (RESERVED_AGENT_ROLES.includes(agent.role)) {
-            throw new Error(
-                `Plugin "${manifest.name}" tries to register role "${agent.role}" which is a built-in role. ` +
-                'Choose a unique role name.',
-            );
+    for (const tool of exports.tools ?? []) {
+        if (!tool?.definition?.name || typeof tool.execute !== 'function') {
+            throw new Error(`Plugin "${name}": every tool needs a definition with a name and an execute function`);
+        }
+        if (RESERVED_TOOL_NAMES.includes(tool.definition.name)) {
+            throw new Error(`Plugin "${name}": tool "${tool.definition.name}" is built in. Choose a unique tool name.`);
         }
     }
 
     for (const provider of exports.providers ?? []) {
+        if (!provider?.name || typeof provider.create !== 'function') {
+            throw new Error(`Plugin "${name}": every provider needs a name and a create function`);
+        }
         if (RESERVED_PROVIDER_NAMES.includes(provider.name as never)) {
-            throw new Error(
-                `Plugin "${manifest.name}" tries to register provider "${provider.name}" which is built-in. ` +
-                'Choose a unique provider name.',
-            );
+            throw new Error(`Plugin "${name}": provider "${provider.name}" is built in. Choose a unique provider name.`);
+        }
+    }
+
+    for (const step of exports.steps ?? []) {
+        if (!step?.name || !/^[a-z][a-z0-9-]*$/.test(step.name) || typeof step.run !== 'function') {
+            throw new Error(`Plugin "${name}": every step needs a lowercase name (letters, digits, dashes) and a run function`);
         }
     }
 }
