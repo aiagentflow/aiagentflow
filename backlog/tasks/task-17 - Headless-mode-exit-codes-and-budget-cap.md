@@ -4,6 +4,7 @@ title: 'Headless mode, exit codes, and budget cap'
 status: To Do
 assignee: []
 created_date: '2026-10-04 01:19'
+updated_date: '2026-10-04 01:47'
 labels:
   - ci
 milestone: m-1
@@ -26,3 +27,9 @@ ordinal: 17000
 - [ ] #2 Exit codes documented and tested
 - [ ] #3 Run aborts cleanly with partial report when budget exceeded
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Found during lint cleanup: batch --budget is a no-op. executeTask in src/core/workflow/task-queue.ts never calls budgetTracker.record (item.tokensUsed = 0), so BudgetTracker.exceeded never trips. Fix as part of this task by returning token totals from runWorkflow.
+<!-- SECTION:NOTES:END -->
