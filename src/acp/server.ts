@@ -20,7 +20,6 @@
  */
 
 import { createRequire } from 'node:module';
-import { createInterface } from 'node:readline';
 import { isAbsolute, join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { runWorkflow } from '../core/workflow/runner.js';
@@ -29,35 +28,18 @@ import { firstStep, nextStep, stepRunner, type WorkflowDefinition } from '../cor
 import { EventBus, type TimedRunEvent } from '../core/events.js';
 import { formatVerdict } from '../agents/verdicts.js';
 import type { ConfirmAnswer } from '../tools/command.js';
+import { JsonRpcEndpoint, RpcCode, RpcError, type JsonObject } from '../utils/jsonrpc.js';
 
 /** ACP protocol version implemented here. */
 export const ACP_PROTOCOL_VERSION = 1;
 
-type Json = Record<string, unknown>;
-
-interface JsonRpcMessage {
-    jsonrpc: '2.0';
-    id?: number | string | null;
-    method?: string;
-    params?: Json;
-    result?: unknown;
-    error?: { code: number; message: string };
-}
+type Json = JsonObject;
 
 interface Session {
     id: string;
     cwd: string;
     /** Aborts the running prompt turn, if any. */
     abort?: AbortController;
-}
-
-/** JSON-RPC error codes. */
-const RPC = { parseError: -32700, invalidRequest: -32600, methodNotFound: -32601, invalidParams: -32602, internalError: -32603 } as const;
-
-class RpcError extends Error {
-    constructor(readonly code: number, message: string) {
-        super(message);
-    }
 }
 
 export interface AcpServerOptions {
@@ -67,60 +49,24 @@ export interface AcpServerOptions {
 
 export class AcpServer {
     private readonly sessions = new Map<string, Session>();
-    private readonly pending = new Map<number, (message: JsonRpcMessage) => void>();
-    private nextRequestId = 1;
+    private readonly rpc: JsonRpcEndpoint;
     private nextSessionId = 1;
     /** tool.called and tool.result for one call arrive back to back, so a counter pairs them. */
     private toolCalls = 0;
+    private permissionRequests = 0;
 
-    constructor(
-        private readonly send: (line: string) => void,
-        private readonly options: AcpServerOptions = {},
-    ) {}
+    constructor(send: (line: string) => void, private readonly options: AcpServerOptions = {}) {
+        this.rpc = new JsonRpcEndpoint(send, (method, params) => this.handle(method, params));
+    }
 
     /** Read messages from `input` until it ends. */
-    async listen(input: Readable): Promise<void> {
-        const lines = createInterface({ input, crlfDelay: Infinity });
-        const inFlight: Promise<void>[] = [];
-        for await (const line of lines) {
-            if (!line.trim()) continue;
-            // Prompt turns run concurrently with the messages that answer their permission requests
-            inFlight.push(this.receive(line));
-        }
-        await Promise.all(inFlight);
+    listen(input: Readable): Promise<void> {
+        return this.rpc.listen(input);
     }
 
     /** Handle one incoming line. */
-    async receive(line: string): Promise<void> {
-        let message: JsonRpcMessage;
-        try {
-            message = JSON.parse(line) as JsonRpcMessage;
-        } catch {
-            this.write({ jsonrpc: '2.0', id: null, error: { code: RPC.parseError, message: 'Parse error' } });
-            return;
-        }
-
-        // A response to one of our requests (session/request_permission)
-        if (message.method === undefined && message.id !== undefined && message.id !== null) {
-            this.pending.get(Number(message.id))?.(message);
-            this.pending.delete(Number(message.id));
-            return;
-        }
-
-        if (!message.method) {
-            this.write({ jsonrpc: '2.0', id: message.id ?? null, error: { code: RPC.invalidRequest, message: 'Invalid request' } });
-            return;
-        }
-
-        const isNotification = message.id === undefined;
-        try {
-            const result = await this.handle(message.method, message.params ?? {});
-            if (!isNotification) this.write({ jsonrpc: '2.0', id: message.id!, result: result ?? {} });
-        } catch (err) {
-            if (isNotification) return;
-            const code = err instanceof RpcError ? err.code : RPC.internalError;
-            this.write({ jsonrpc: '2.0', id: message.id!, error: { code, message: err instanceof Error ? err.message : String(err) } });
-        }
+    receive(line: string): Promise<void> {
+        return this.rpc.receive(line);
     }
 
     private async handle(method: string, params: Json): Promise<unknown> {
@@ -141,7 +87,7 @@ export class AcpServer {
 
             case 'session/new': {
                 const cwd = params.cwd;
-                if (typeof cwd !== 'string' || !isAbsolute(cwd)) throw new RpcError(RPC.invalidParams, 'cwd must be an absolute path');
+                if (typeof cwd !== 'string' || !isAbsolute(cwd)) throw new RpcError(RpcCode.invalidParams, 'cwd must be an absolute path');
                 const id = `aiagentflow-${this.nextSessionId++}`;
                 this.sessions.set(id, { id, cwd });
                 return { sessionId: id };
@@ -155,21 +101,21 @@ export class AcpServer {
                 return undefined;
 
             default:
-                throw new RpcError(RPC.methodNotFound, `Method not found: ${method}`);
+                throw new RpcError(RpcCode.methodNotFound, `Method not found: ${method}`);
         }
     }
 
     private session(id: unknown): Session {
         const session = this.sessions.get(String(id));
-        if (!session) throw new RpcError(RPC.invalidParams, `Unknown session: ${String(id)}`);
+        if (!session) throw new RpcError(RpcCode.invalidParams, `Unknown session: ${String(id)}`);
         return session;
     }
 
     /** Run a workflow for one prompt turn and stream its progress. */
     private async prompt(session: Session, prompt: unknown): Promise<{ stopReason: string }> {
         const task = promptText(prompt);
-        if (!task) throw new RpcError(RPC.invalidParams, 'prompt has no text');
-        if (session.abort) throw new RpcError(RPC.invalidRequest, 'A prompt is already running in this session');
+        if (!task) throw new RpcError(RpcCode.invalidParams, 'prompt has no text');
+        if (session.abort) throw new RpcError(RpcCode.invalidRequest, 'A prompt is already running in this session');
 
         const workflow = getWorkflow(session.cwd, this.options.workflow).definition;
         const plan = new PlanTracker(workflow);
@@ -248,9 +194,9 @@ export class AcpServer {
 
     /** Ask the editor whether a command may run. Anything but an allow counts as no. */
     private async requestPermission(session: Session, command: string): Promise<ConfirmAnswer> {
-        const response = await this.request('session/request_permission', {
+        const response = await this.rpc.request('session/request_permission', {
             sessionId: session.id,
-            toolCall: { toolCallId: `cmd-${this.nextRequestId}`, title: `Run: ${command}`, kind: 'execute', status: 'pending', rawInput: { command } },
+            toolCall: { toolCallId: `cmd-${++this.permissionRequests}`, title: `Run: ${command}`, kind: 'execute', status: 'pending', rawInput: { command } },
             options: [
                 { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
                 { optionId: 'allow_always', name: 'Allow for this run', kind: 'allow_always' },
@@ -262,24 +208,12 @@ export class AcpServer {
         return outcome.optionId === 'allow_always' ? 'always' : outcome.optionId === 'allow_once' ? 'yes' : 'no';
     }
 
-    private request(method: string, params: Json): Promise<JsonRpcMessage> {
-        const id = this.nextRequestId++;
-        return new Promise(resolve => {
-            this.pending.set(id, resolve);
-            this.write({ jsonrpc: '2.0', id, method, params });
-        });
-    }
-
     private update(session: Session, update: Json): void {
-        this.write({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: session.id, update } });
+        this.rpc.notify('session/update', { sessionId: session.id, update });
     }
 
     private say(session: Session, text: string): void {
         this.update(session, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `${text}\n` } });
-    }
-
-    private write(message: JsonRpcMessage): void {
-        this.send(`${JSON.stringify(message)}\n`);
     }
 }
 
