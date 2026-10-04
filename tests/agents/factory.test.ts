@@ -37,19 +37,22 @@ describe('createAgent tool wiring', () => {
         const config = structuredClone(DEFAULT_CONFIG);
         config.agents.security = { ...config.agents.security, maxTurns: 1 };
         const extra: Tool = { definition: { name: 'scan', description: 'scan', inputSchema: { type: 'object' } }, execute: async () => 'clean' };
-        const provider = new MockProvider([{ content: '', toolCalls: [{ name: 'scan', input: {} }] }, 'PASS']);
+        const provider = new MockProvider([
+            { content: '', toolCalls: [{ name: 'scan', input: {} }] },
+            '```json\n{"verdict":"pass","summary":"clean","issues":[]}\n```',
+        ]);
         holder.provider = provider;
 
         const out = await createAgent('security', config, dir, { tools: [extra] }).execute({ task: 't' });
 
-        expect(out.content).toBe('PASS');
-        expect(provider.calls[0]!.options?.tools?.map(t => t.name)).toEqual(['read_file', 'list_dir', 'grep', 'scan']);
+        expect(out.metadata?.verdict).toMatchObject({ verdict: 'pass' });
+        expect(provider.calls[0]!.options?.tools?.map(t => t.name)).toEqual(['read_file', 'list_dir', 'grep', 'scan', 'submit_verdict']);
         // maxTurns 1: second call is the forced final answer without tools
         expect(provider.calls[1]!.options?.tools).toBeUndefined();
     });
 
     it('gives code-writing roles write tools and judging roles read-only tools', async () => {
-        const provider = new MockProvider(['a', 'b']);
+        const provider = new MockProvider(['a', { content: '', toolCalls: [{ name: 'submit_verdict', input: { verdict: 'approve', summary: 'ok', issues: [] } }] }]);
         holder.provider = provider;
         const config = structuredClone(DEFAULT_CONFIG);
 
@@ -58,7 +61,7 @@ describe('createAgent tool wiring', () => {
 
         const names = (i: number) => provider.calls[i]!.options?.tools?.map(t => t.name).filter(n => n !== 'remember');
         expect(names(0)).toEqual(['read_file', 'list_dir', 'grep', 'edit_file', 'write_file', 'run_command']);
-        expect(names(1)).toEqual(['read_file', 'list_dir', 'grep']);
+        expect(names(1)).toEqual(['read_file', 'list_dir', 'grep', 'submit_verdict']);
     });
 
     it('adds no built-in tools in legacyFileBlocks mode and uses the FILE: prompt', async () => {

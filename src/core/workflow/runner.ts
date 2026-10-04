@@ -23,6 +23,8 @@ import {
     type WorkflowContext,
 } from './engine.js';
 import type { AgentRole } from '../../agents/types.js';
+import type { AgentOutput } from '../../agents/base.js';
+import { isPositive, type Verdict, type VerdictRole } from '../../agents/verdicts.js';
 import { AGENT_ROLE_LABELS } from '../../agents/types.js';
 import { createAgent } from '../../agents/factory.js';
 import { GitClient } from '../../git/client.js';
@@ -33,7 +35,7 @@ import { runLint, runFormat } from './lint-runner.js';
 import { requestApproval, needsApproval, requestPlanApproval, isApprovalGated } from './approval.js';
 import { TokenTracker } from './token-tracker.js';
 import { saveSession, loadSession, listSessions } from './session.js';
-import { loadQAPolicy, evaluateReview, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
+import { loadQAPolicy, formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
 import { loadContextDocuments, formatContextForAgent, loadSourceFiles, formatSourcesForAgent, type ContextDocument } from './context-loader.js';
 import { loadConfig } from '../config/manager.js';
 import { McpRegistry } from '../../mcp/registry.js';
@@ -433,7 +435,7 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
                 }
 
                 // Transition based on agent output
-                ctx = await applyAgentOutput(ctx, agentRole, output.content, config, projectRoot, qaPolicy, changes);
+                ctx = await applyAgentOutput(ctx, agentRole, output, config, projectRoot, changes);
             } catch (err) {
                 spinner.fail(`${agentRole} failed`);
 
@@ -785,13 +787,13 @@ function getLatestOutput(ctx: WorkflowContext): string | undefined {
  */
 async function applyAgentOutput(
     ctx: WorkflowContext,
-    role: string,
-    content: string,
+    role: AgentRole,
+    output: AgentOutput,
     config: AppConfig,
     projectRoot: string,
-    qaPolicy: QAPolicy,
     changes: ChangeSet,
 ): Promise<WorkflowContext> {
+    const { content } = output;
     switch (role) {
         case 'architect':
             if (ctx.state === 'idle') {
@@ -827,30 +829,20 @@ async function applyAgentOutput(
         }
 
         case 'reviewer': {
-            const upper = content.toUpperCase();
-            const reviewApproved = upper.includes('APPROVE') &&
-                !upper.includes('REQUEST_CHANGES') &&
-                !upper.includes('REJECT');
-
-            // Evaluate review against QA policy (informational when reviewer approves)
-            const evaluation = evaluateReview(content, qaPolicy);
-            if (evaluation.totalIssues > 0) {
-                logger.info(`QA policy: ${evaluation.criticalCount} critical, ${evaluation.warningCount} warning(s), ${evaluation.totalIssues - evaluation.criticalCount - evaluation.warningCount} nit(s)`);
-            }
-
-            // Trust the reviewer's explicit verdict.
-            // QA policy only blocks when the reviewer did NOT approve.
-            const approved = reviewApproved;
-            return transition(ctx, { type: 'REVIEW_DONE', payload: { approved, feedback: content } });
+            const verdict = requireVerdict(output, role);
+            logIssueCounts('Review', verdict);
+            ctx = transition(ctx, { type: 'REVIEW_DONE', payload: { approved: isPositive(verdict), feedback: content } });
+            return withVerdict(ctx, role, verdict);
         }
 
         case 'security': {
-            const upper = content.toUpperCase();
-            const passed = upper.includes('PASS') && !upper.includes('FAIL');
+            const verdict = requireVerdict(output, role);
+            const passed = isPositive(verdict);
             if (!passed) {
                 logger.warn('Security review found issues — routing to Fixer.');
             }
-            return transition(ctx, { type: 'SECURITY_CHECKED', payload: { passed, findings: content } });
+            ctx = transition(ctx, { type: 'SECURITY_CHECKED', payload: { passed, findings: content } });
+            return withVerdict(ctx, role, verdict);
         }
 
         case 'tester': {
@@ -903,18 +895,36 @@ async function applyAgentOutput(
         }
 
         case 'judge': {
-            const passed = content.toUpperCase().includes('PASS') &&
-                !content.toUpperCase().includes('FAIL');
-            if (passed) {
-                return transition(ctx, { type: 'QA_APPROVED' });
-            } else {
-                return transition(ctx, { type: 'QA_REJECTED', payload: { reason: content } });
-            }
+            const verdict = requireVerdict(output, role);
+            ctx = isPositive(verdict)
+                ? transition(ctx, { type: 'QA_APPROVED' })
+                : transition(ctx, { type: 'QA_REJECTED', payload: { reason: content } });
+            return withVerdict(ctx, role, verdict);
         }
 
         default:
             return ctx;
     }
+}
+
+/** The structured verdict a judging agent attached to its output. */
+function requireVerdict(output: AgentOutput, role: VerdictRole): Verdict {
+    const verdict = output.metadata?.verdict as Verdict | undefined;
+    if (!verdict) {
+        throw new WorkflowError(`${AGENT_ROLE_LABELS[role]} produced no verdict`, { role });
+    }
+    return verdict;
+}
+
+function withVerdict(ctx: WorkflowContext, role: VerdictRole, verdict: Verdict): WorkflowContext {
+    return { ...ctx, verdicts: { ...ctx.verdicts, [role]: verdict } };
+}
+
+function logIssueCounts(label: string, verdict: Verdict): void {
+    if (verdict.issues.length === 0) return;
+    const counts = new Map<string, number>();
+    for (const issue of verdict.issues) counts.set(issue.severity, (counts.get(issue.severity) ?? 0) + 1);
+    logger.info(`${label}: ${[...counts].map(([sev, n]) => `${n} ${sev}`).join(', ')}`);
 }
 
 /**
