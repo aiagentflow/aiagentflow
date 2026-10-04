@@ -4,6 +4,7 @@ title: 'v2 docs, migration guide, and website'
 status: To Do
 assignee: []
 created_date: '2026-10-04 01:19'
+updated_date: '2026-10-04 01:54'
 labels:
   - docs
 milestone: m-2
@@ -28,3 +29,9 @@ README rewrite around v2 positioning, MIGRATION.md (v1 -> v2), workflow + permis
 - [ ] #3 Website synced
 - [ ] #4 PLAN_V2.md and TRACKING.md removed or archived
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+MIGRATION.md: plugin providers must implement the v2 LLMProvider contract (ChatMessage union, ChatResponse.stopReason/toolCalls, no onToolCall in ChatOptions).
+<!-- SECTION:NOTES:END -->
