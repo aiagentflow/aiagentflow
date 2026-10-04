@@ -20,6 +20,12 @@ v2 turns aiagentflow into a quality-gated pipeline of agents that work through t
 - Official GitHub Action (`action/`).
 - `aiagentflow eval` with a ten-task suite and a manual CI workflow.
 
+### Interoperability
+- External agent steps: coder, fixer, and tester steps can run Claude Code, OpenCode, or any agent CLI, with aiagentflow's gates still deciding.
+- `aiagentflow acp`: Agent Client Protocol server for editors such as Zed.
+- `aiagentflow mcp serve`: run, review, plan, and memory as MCP tools for other agents.
+- `aiagentflow watch`: re-review changes (or re-run a task) when files change.
+
 ### Config, plugins, and safety
 - Config version 2 and `aiagentflow migrate`.
 - `run_command` permission model: allow/deny patterns checked per command part, per-role tool lists.
@@ -36,3 +42,4 @@ v2 turns aiagentflow into a quality-gated pipeline of agents that work through t
 - The reviewer never saw the code it reviewed, only the list of changed files.
 - `aiagentflow config` printed API keys in plain text.
 - v1 plugin agents and providers were never used in runs.
+- The MCP client sent an id with `notifications/initialized`.

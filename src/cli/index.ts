@@ -29,6 +29,7 @@ import { reviewCommand } from './commands/review.js';
 import { migrateCommand } from './commands/migrate.js';
 import { evalCommand } from './commands/eval.js';
 import { acpCommand } from './commands/acp.js';
+import { watchCommand } from './commands/watch.js';
 
 const program = new Command();
 
@@ -59,5 +60,6 @@ program.addCommand(reviewCommand);
 program.addCommand(migrateCommand);
 program.addCommand(evalCommand);
 program.addCommand(acpCommand);
+program.addCommand(watchCommand);
 
 program.parse();

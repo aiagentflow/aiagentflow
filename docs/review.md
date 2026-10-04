@@ -21,6 +21,16 @@ With `--pr <n> --comment`, findings that point at a line inside the diff become 
 
 When reviewing a PR locally, the agents read files from your current checkout. For exact file contents, check the PR out first (`gh pr checkout 42`). In CI the PR is already checked out.
 
+## Watch mode
+
+```bash
+aiagentflow watch            # re-review uncommitted changes after each burst of saves
+aiagentflow watch --staged   # re-review staged changes
+aiagentflow watch --task "Keep the API docs in sync with src/api" --workflow fast
+```
+
+Saves are debounced (`--debounce <ms>`, default 1500) and git-ignored files are skipped. Only one run happens at a time: a save during a review makes it stale, so it is cancelled at the next step and re-run. With `--task`, the run edits files itself, so saves during it are queued instead, and its own edits never trigger another run.
+
 ## Options
 
 | Option | |
