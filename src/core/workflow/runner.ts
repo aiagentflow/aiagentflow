@@ -148,6 +148,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
                 task,
             });
             effectiveRoot = worktree.path;
+            await warnAboutUncommittedChanges(git);
         } catch (err) {
             logger.warn(`Worktree creation failed, falling back to inplace: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -638,6 +639,25 @@ function applyModePreset(config: AppConfig, mode: string): void {
         if (agentCfg) {
             agentCfg.temperature = temp;
         }
+    }
+}
+
+/**
+ * A worktree starts from the last commit, so local edits are not in it.
+ * Say so, since agents will not see them.
+ */
+async function warnAboutUncommittedChanges(git: GitClient): Promise<void> {
+    try {
+        const status = await git.getStatus();
+        const changed = [...status.staged, ...status.modified, ...status.untracked].filter(f => !f.startsWith('.aiagentflow/'));
+        if (changed.length > 0) {
+            logger.warn(
+                `${changed.length} uncommitted change(s) are not in the worktree (it starts from your last commit). ` +
+                'Commit them first, or use --inplace to work on them directly.',
+            );
+        }
+    } catch {
+        // Status is advisory; never block a run on it
     }
 }
 
