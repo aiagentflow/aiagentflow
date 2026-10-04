@@ -16,11 +16,11 @@ import { enableJsonOutput, OUTPUT_FORMATS, type OutputFormat } from '../utils/js
 import { ExitCode, exitCodeForBatch, exitCodeForError, exitCodeForRun } from '../utils/exit-codes.js';
 import { runWorkflow } from '../../core/workflow/runner.js';
 import { runTaskQueue, parseTasks } from '../../core/workflow/task-queue.js';
-import type { BudgetLimits } from '../../core/workflow/budget-tracker.js';
+import { addBudgetOptions, budgetFromFlags, type BudgetFlags } from '../utils/run-options.js';
 import { fetchPR, fetchIssue, buildPRTask, buildIssueTask, openPR } from '../../integrations/github.js';
 import { logger } from '../../utils/logger.js';
 
-interface RunCommandOptions {
+interface RunCommandOptions extends BudgetFlags {
     workflow?: string;
     output: OutputFormat;
     auto?: boolean;
@@ -35,15 +35,12 @@ interface RunCommandOptions {
     reviewPlan?: boolean;
     approvalGates?: string[];
     parallel?: number;
-    maxTokens?: number;
-    maxCost?: number;
-    maxTime?: number;
     summary: boolean;
     pr?: number;
     issue?: number;
 }
 
-export const runCommand = new Command('run')
+export const runCommand = addBudgetOptions(new Command('run')
     .description('Run an AI workflow task')
     .argument('<task>', 'Task description or path to a task list file (.txt)')
     .option('-w, --workflow <name>', 'Workflow to run: standard (default), fast, review, security-audit, or a project workflow')
@@ -61,12 +58,9 @@ export const runCommand = new Command('run')
     .option('--review-plan', 'Pause for plan approval after the Architect runs')
     .option('--approval-gates <roles...>', 'Agent roles that require explicit approval (e.g. architect coder)')
     .option('--parallel <n>', 'Run batch tasks N at a time in parallel worktrees (batch mode only)', parseInt)
-    .option('--max-tokens <n>', 'Stop when total tokens reach this budget (exit code 3)', parseInt)
-    .option('--max-cost <usd>', 'Stop when estimated USD cost reaches this budget (exit code 3)', parseFloat)
-    .option('--max-time <minutes>', 'Stop when wall-clock time reaches this budget (exit code 3)', parseFloat)
     .option('--no-summary', 'Suppress the token/cost summary at the end of the run')
     .option('--pr <number>', 'Fetch a GitHub PR and address its review comments', parseInt)
-    .option('--issue <number>', 'Fetch a GitHub issue and implement it', parseInt)
+    .option('--issue <number>', 'Fetch a GitHub issue and implement it', parseInt))
     .action(async (task: string, options: RunCommandOptions) => {
         // exitCode instead of exit() after a run, so piped NDJSON output is fully flushed
         process.exitCode = await run(task, options);
@@ -86,7 +80,7 @@ async function run(task: string, options: RunCommandOptions): Promise<number> {
         logger.warn('--mode is deprecated and will be removed in v3. Use --workflow to pick the pipeline and set iterations/approval in config.');
     }
 
-    const budget = buildBudget(options);
+    const budget = budgetFromFlags(options);
     // --isolate → 'worktree', --no-isolate → 'inplace', neither → config
     const isolation = options.isolate === true ? 'worktree' : options.isolate === false ? 'inplace' : undefined;
 
@@ -176,14 +170,4 @@ async function run(task: string, options: RunCommandOptions): Promise<number> {
         logger.error(err instanceof Error ? err.message : String(err));
         return exitCodeForError(err);
     }
-}
-
-/** Budget from --max-tokens / --max-cost / --max-time, or undefined if none was given. */
-function buildBudget(options: RunCommandOptions): BudgetLimits | undefined {
-    const budget: BudgetLimits = {
-        ...(options.maxTokens ? { maxTokens: options.maxTokens } : {}),
-        ...(options.maxCost ? { maxCostUsd: options.maxCost } : {}),
-        ...(options.maxTime ? { maxTimeMs: options.maxTime * 60_000 } : {}),
-    };
-    return Object.keys(budget).length > 0 ? budget : undefined;
 }
