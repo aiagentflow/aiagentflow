@@ -49,6 +49,11 @@ export class ToolRegistry {
         return this.tools.size;
     }
 
+    /** All registered tools. */
+    list(): Tool[] {
+        return [...this.tools.values()];
+    }
+
     /** Definitions to send to the model. */
     get definitions(): ToolDefinition[] {
         return [...this.tools.values()].map(t => t.definition);

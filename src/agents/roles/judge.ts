@@ -5,11 +5,12 @@
  * Used by: workflow runner
  */
 
-import { BaseAgent, type AgentInput, type AgentOptions, type AgentOutput } from '../base.js';
+import type { AgentInput, AgentOptions } from '../base.js';
+import { VerdictAgent } from '../verdict-agent.js';
 import { loadAgentPrompt } from '../../prompts/library.js';
 import type { LLMProvider } from '../../providers/types.js';
 
-export class JudgeAgent extends BaseAgent {
+export class JudgeAgent extends VerdictAgent {
     private readonly projectRoot: string;
 
     constructor(
@@ -38,14 +39,5 @@ export class JudgeAgent extends BaseAgent {
         }
 
         return prompt;
-    }
-
-    /**
-     * Check if the judge approves.
-     * Looks for "PASS" in the output (case-insensitive).
-     */
-    static isPassed(output: AgentOutput): boolean {
-        const content = output.content.toUpperCase();
-        return content.includes('PASS') && !content.includes('FAIL');
     }
 }
