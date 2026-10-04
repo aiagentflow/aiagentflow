@@ -147,6 +147,11 @@ export const workflowConfigSchema = z.object({
     lintCommand: z.string().optional(),
     /** Format command to run silently after file writes (e.g., 'prettier --write'). */
     formatCommand: z.string().optional(),
+    /**
+     * v1 behaviour: code-writing agents return whole files as `FILE:` blocks instead
+     * of editing through tools. For models without tool support.
+     */
+    legacyFileBlocks: z.boolean().default(false),
     /** Whether to auto-commit changes when QA passes. */
     autoCommit: z.boolean().default(false),
     /** Commit message template. Supports {task} placeholder. */

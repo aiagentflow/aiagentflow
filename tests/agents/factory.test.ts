@@ -43,8 +43,33 @@ describe('createAgent tool wiring', () => {
         const out = await createAgent('security', config, dir, { tools: [extra] }).execute({ task: 't' });
 
         expect(out.content).toBe('PASS');
-        expect(provider.calls[0]!.options?.tools?.map(t => t.name)).toEqual(['scan']);
+        expect(provider.calls[0]!.options?.tools?.map(t => t.name)).toEqual(['read_file', 'list_dir', 'grep', 'scan']);
         // maxTurns 1: second call is the forced final answer without tools
         expect(provider.calls[1]!.options?.tools).toBeUndefined();
+    });
+
+    it('gives code-writing roles write tools and judging roles read-only tools', async () => {
+        const provider = new MockProvider(['a', 'b']);
+        holder.provider = provider;
+        const config = structuredClone(DEFAULT_CONFIG);
+
+        await createAgent('coder', config, dir).execute({ task: 't' });
+        await createAgent('reviewer', config, dir).execute({ task: 't' });
+
+        const names = (i: number) => provider.calls[i]!.options?.tools?.map(t => t.name).filter(n => n !== 'remember');
+        expect(names(0)).toEqual(['read_file', 'list_dir', 'grep', 'edit_file', 'write_file', 'run_command']);
+        expect(names(1)).toEqual(['read_file', 'list_dir', 'grep']);
+    });
+
+    it('adds no built-in tools in legacyFileBlocks mode and uses the FILE: prompt', async () => {
+        const provider = new MockProvider(['a']);
+        holder.provider = provider;
+        const config = structuredClone(DEFAULT_CONFIG);
+        config.workflow.legacyFileBlocks = true;
+
+        await createAgent('coder', config, dir, { memoryDisabled: true }).execute({ task: 't' });
+
+        expect(provider.calls[0]!.options?.tools).toBeUndefined();
+        expect(provider.calls[0]!.options?.systemPrompt).toContain('FILE: path/to/file.ext');
     });
 });

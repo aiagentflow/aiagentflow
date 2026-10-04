@@ -65,6 +65,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         isolation: 'inplace' as const,
         autoMerge: 'never' as const,
         autoRunTests: true,
+        legacyFileBlocks: false,
         autoCommit: false,
         autoCommitMessage: 'ai: {task}',
     },

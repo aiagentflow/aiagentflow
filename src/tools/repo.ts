@@ -262,7 +262,7 @@ export function resolveInside(root: string, path: string): string {
 
     let existing = abs;
     while (!existsSync(existing)) existing = dirname(existing);
-    if (!isWithin(root, realpathSync(existing))) throw new Error(`Path is outside the project: ${path}`);
+    if (!isWithin(realpathSync(root), realpathSync(existing))) throw new Error(`Path is outside the project: ${path}`);
 
     return abs;
 }

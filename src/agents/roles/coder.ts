@@ -23,7 +23,7 @@ export class CoderAgent extends BaseAgent {
     }
 
     protected buildSystemPrompt(): string {
-        const rolePrompt = loadAgentPrompt(this.projectRoot, 'coder');
+        const rolePrompt = loadAgentPrompt(this.projectRoot, 'coder', { legacyFileBlocks: this.legacyFileBlocks });
         const standards = loadCodingStandards(this.projectRoot);
 
         let prompt = rolePrompt;

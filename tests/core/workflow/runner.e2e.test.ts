@@ -139,4 +139,59 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
         expect(sessions).toHaveLength(1);
         expect(sessions[0]!.context.state).toBe('qa_approved');
     });
+
+    describe('with tool-driven agents', () => {
+        it('records files written through tools and runs the workflow test command', async () => {
+            dir = setupProject({ requireFix: true });
+            const { ctx, provider } = await run(dir, [
+                PLAN,
+                // Coder: explore, then create a file
+                { content: '', toolCalls: [{ name: 'list_dir', input: { path: '.' } }] },
+                { content: '', toolCalls: [{ name: 'write_file', input: { path: 'src/app.ts', content: 'export const app = 1;\n' } }] },
+                'Created src/app.ts.',
+                // Reviewer reads the changed file
+                { content: '', toolCalls: [{ name: 'read_file', input: { path: 'src/app.ts' } }] },
+                'APPROVE',
+                'PASS',
+                // Tester writes a test and runs the allowed test command (fails: src/fixed.ts missing)
+                { content: '', toolCalls: [
+                    { name: 'write_file', input: { path: 'tests/app.test.ts', content: 'test\n' } },
+                    { name: 'run_command', input: { command: 'node check.cjs' } },
+                ] },
+                'Wrote tests/app.test.ts.',
+                // Fixer edits via tools
+                { content: '', toolCalls: [{ name: 'write_file', input: { path: 'src/fixed.ts', content: 'export const fixed = true;\n' } }] },
+                'Root cause: missing module. Fix: created src/fixed.ts.',
+                'APPROVE', 'PASS',
+                { content: '', toolCalls: [{ name: 'edit_file', input: { path: 'tests/app.test.ts', old_string: 'test', new_string: 'test 2' } }] },
+                'Updated tests.',
+                'PASS',
+            ]);
+
+            expect(ctx.state).toBe('qa_approved');
+            expect(provider.remaining).toBe(0);
+            expect(ctx.generatedFiles).toEqual(expect.arrayContaining(['src/app.ts', 'src/fixed.ts']));
+            expect(ctx.testFiles).toEqual(expect.arrayContaining(['tests/app.test.ts']));
+            expect(readFileSync(join(dir, 'tests', 'app.test.ts'), 'utf-8')).toBe('test 2\n');
+
+            // The reviewer saw the real file contents through read_file
+            const reviewerToolTurn = provider.calls[5]!.messages[2];
+            expect(reviewerToolTurn).toMatchObject({ role: 'tool', results: [{ content: expect.stringContaining('export const app = 1;') }] });
+            // The tester ran the workflow test command (auto-allowed) and saw it fail
+            const testerToolTurn = provider.calls[8]!.messages[2];
+            expect(testerToolTurn).toMatchObject({ role: 'tool', results: [{}, { content: expect.stringContaining('Exit code: 1') }] });
+        });
+
+        it('refuses commands outside the allow list in --auto runs', async () => {
+            dir = setupProject();
+            const { provider } = await run(dir, [
+                PLAN,
+                { content: '', toolCalls: [{ name: 'run_command', input: { command: 'touch pwned.txt' } }] },
+                CODE, 'APPROVE', 'PASS', TESTS, 'PASS',
+            ]);
+
+            expect(provider.calls[2]!.messages[2]).toMatchObject({ role: 'tool', results: [{ isError: true, content: expect.stringContaining('non-interactive') }] });
+            expect(existsSync(join(dir, 'pwned.txt'))).toBe(false);
+        });
+    });
 });
