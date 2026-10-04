@@ -40,7 +40,6 @@ describe('parseWorkflow', () => {
             '    checks: [test]',
             '    onFail: nowhere',
         ].join('\n')));
-        expect(message).toContain('steps[0].onFail: required when the step has a gate');
         expect(message).toContain('steps[0].gate: agent "coder" does not return a verdict');
         expect(message).toContain('steps[1].id: duplicate step id "review"');
         expect(message).toContain('steps[1].onFail: unknown step "nowhere"');
@@ -124,6 +123,6 @@ describe('workflow loader', () => {
     });
 
     it('names the available workflows when one is missing', () => {
-        expect(() => getWorkflow(root, 'nope')).toThrow('Unknown workflow "nope". Available: standard');
+        expect(() => getWorkflow(root, 'nope')).toThrow('Unknown workflow "nope". Available: fast, review, security-audit, standard');
     });
 });

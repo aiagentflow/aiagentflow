@@ -55,4 +55,54 @@ steps:
     checks: [format]
     next: review
 `,
+
+    fast: `name: fast
+description: Implement and test, fixing until the tests pass. No planning or review.
+
+steps:
+  - id: implement
+    agent: coder
+    description: Implement the task
+    checks: [format, lint]
+    onFail: fix
+
+  - id: test
+    agent: tester
+    description: Write tests and run the test suite
+    checks: [test]
+    onFail: fix
+
+  - id: fix
+    agent: fixer
+    description: Fix lint errors and test failures
+    trigger: on-fail
+    checks: [format]
+    next: test
+`,
+
+    review: `name: review
+description: Review existing changes without editing anything. Fails on a negative verdict.
+
+steps:
+  - id: review
+    agent: reviewer
+    description: Review the changes for bugs and quality
+    gate: verdict
+
+  - id: security
+    agent: security
+    description: Check the changes for vulnerabilities
+    gate: verdict
+`,
+
+    'security-audit': `name: security-audit
+description: Audit the whole repository for vulnerabilities. Read-only; fails on a negative verdict.
+
+steps:
+  - id: audit
+    agent: security
+    description: Explore the codebase and report vulnerabilities
+    gate: verdict
+    maxTurns: 30
+`,
 };

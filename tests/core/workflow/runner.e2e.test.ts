@@ -332,4 +332,47 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             expect(ctx.history.map(h => h.step)).toEqual(['judge']);
         });
     });
+
+    describe('built-in workflows', () => {
+        const runNamed = async (workflow: string, steps: Array<MockStep | string>) => {
+            const provider = new MockProvider(steps);
+            holder.provider = provider;
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Task', workflow, auto: true, streaming: false, isolation: 'inplace', showSummary: false });
+            return { ctx, provider };
+        };
+        const trail = (ctx: { history: Array<{ step: string; outcome: string }> }) => ctx.history.map(h => `${h.step}:${h.outcome}`);
+
+        it('fast: implements and tests without planning or review', async () => {
+            dir = setupProject({ requireFix: true });
+            const { ctx, provider } = await runNamed('fast', [CODE, TESTS, FIX, TESTS]);
+            expect(ctx.status).toBe('passed');
+            expect(trail(ctx)).toEqual(['implement:passed', 'test:failed', 'fix:passed', 'test:passed']);
+            expect(provider.remaining).toBe(0);
+        });
+
+        it('review: passes on positive verdicts without touching files', async () => {
+            dir = setupProject();
+            const { ctx, provider } = await runNamed('review', [APPROVE, PASS]);
+            expect(ctx.status).toBe('passed');
+            expect(trail(ctx)).toEqual(['review:passed', 'security:passed']);
+            // Judging roles never get write tools
+            expect(provider.calls[0]!.options?.tools?.map(t => t.name)).not.toContain('edit_file');
+        });
+
+        it('review: fails the run on a negative verdict, without a fix loop', async () => {
+            dir = setupProject();
+            const { ctx } = await runNamed('review', [REJECT]);
+            expect(ctx.status).toBe('failed');
+            expect(ctx.failureReason).toContain('did not pass the change');
+            expect(trail(ctx)).toEqual(['review:failed']);
+        });
+
+        it('security-audit: one read-only security step that gates the run', async () => {
+            dir = setupProject();
+            const findings = verdict('fail', [{ severity: 'critical', message: 'Hard-coded secret', file: 'src/config.ts', line: 3 }]);
+            const { ctx } = await runNamed('security-audit', [findings]);
+            expect(ctx.status).toBe('failed');
+            expect(ctx.verdicts?.security?.issues[0]).toMatchObject({ severity: 'critical', file: 'src/config.ts' });
+        });
+    });
 });
