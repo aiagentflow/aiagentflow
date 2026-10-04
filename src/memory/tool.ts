@@ -1,19 +1,19 @@
 /**
  * The `remember` tool — lets agents write to the project memory store.
  *
- * This is a synthetic tool (not backed by an MCP server). It is registered
- * in the provider's tool-use loop and handled locally by the runner before
- * the result is sent back to the LLM.
+ * This is a synthetic tool (not backed by an MCP server). The agent factory
+ * adds it to each eligible agent's ToolRegistry; calls are handled locally.
  *
  * Agents can only write types their role is authorized for (see MEMORY_WRITE_ROLES).
  * Bodies are capped at MAX_MEMORY_BODY_CHARS to prevent token bloat.
  *
- * Dependency direction: memory/tool.ts → memory/types.ts, memory/store.ts, providers/types.ts
- * Used by: agents/factory.ts, core/workflow/runner.ts
+ * Dependency direction: memory/tool.ts → memory/types.ts, memory/store.ts, providers/types.ts, tools/registry.ts (types)
+ * Used by: agents/factory.ts
  */
 
 import type { ToolDefinition, ToolCall, ToolResult } from '../providers/types.js';
 import type { AgentRole } from '../agents/types.js';
+import type { Tool } from '../tools/registry.js';
 import { save } from './store.js';
 import {
     MEMORY_TYPES,
@@ -153,4 +153,15 @@ export function handleRememberCall(
             isError: true,
         };
     }
+}
+
+/** The `remember` tool bound to one agent role and project. */
+export function createRememberTool(role: AgentRole, projectRoot: string): Tool {
+    return {
+        definition: rememberToolDefinition,
+        async execute(input) {
+            const result = handleRememberCall({ name: REMEMBER_TOOL_NAME, input, callId: '' }, role, projectRoot);
+            return { content: result.content, isError: result.isError };
+        },
+    };
 }

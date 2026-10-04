@@ -1,9 +1,11 @@
 /**
  * Agent role type definitions.
  *
- * Dependency direction: agents/types.ts → nothing (leaf module)
+ * Dependency direction: agents/types.ts → providers/types.ts (types only)
  * Used by: config schemas, workflow engine, provider registry
  */
+
+import type { ToolCall } from '../providers/types.js';
 
 /** All supported agent roles in the workflow. */
 export type AgentRole = 'architect' | 'coder' | 'reviewer' | 'security' | 'tester' | 'fixer' | 'judge';
@@ -23,6 +25,8 @@ export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
 export interface StreamCallbacks {
     /** Called for each text chunk as it arrives. */
     onChunk?: (text: string) => void;
+    /** Called when the model requests a tool call. */
+    onToolCall?: (call: ToolCall) => void;
     /** Called once when the full response is complete. */
     onComplete?: (fullText: string) => void;
 }

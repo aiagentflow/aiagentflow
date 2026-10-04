@@ -9,7 +9,7 @@
  * Used by: workflow runner
  */
 
-import { BaseAgent, type AgentInput } from '../base.js';
+import { BaseAgent, type AgentInput, type AgentOptions } from '../base.js';
 import { loadAgentPrompt, loadCodingStandards } from '../../prompts/library.js';
 import type { LLMProvider } from '../../providers/types.js';
 
@@ -18,7 +18,7 @@ export class ArchitectAgent extends BaseAgent {
 
     constructor(
         provider: LLMProvider,
-        options: { model: string; temperature?: number; maxTokens?: number },
+        options: AgentOptions,
         projectRoot: string,
     ) {
         super('architect', provider, { ...options, temperature: options.temperature ?? 0.8 });

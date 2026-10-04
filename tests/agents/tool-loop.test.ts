@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { BaseAgent, type AgentInput } from '../../src/agents/base.js';
-import type { LLMProvider, ToolCall, ToolResult } from '../../src/providers/types.js';
+import { BaseAgent, type AgentInput, type AgentOptions } from '../../src/agents/base.js';
+import { ToolRegistry, type Tool } from '../../src/tools/registry.js';
+import type { LLMProvider, ToolCall } from '../../src/providers/types.js';
 import { MockProvider, type MockStep } from '../helpers/mock-provider.js';
 
 class TestAgent extends BaseAgent {
@@ -12,10 +13,13 @@ class TestAgent extends BaseAgent {
     }
 }
 
-const TOOL = { name: 'echo', description: 'Echo input', inputSchema: { type: 'object' } };
+function echoTool(execute = vi.fn(async (input: Record<string, unknown>) => `echo ${JSON.stringify(input)}`)) {
+    const tool: Tool = { definition: { name: 'echo', description: 'Echo input', inputSchema: { type: 'object' } }, execute };
+    return { tool, execute };
+}
 
-function makeAgent(provider: LLMProvider, onToolCall?: (call: ToolCall) => Promise<ToolResult>) {
-    return new TestAgent('coder', provider, { model: 'm', tools: [TOOL], onToolCall });
+function makeAgent(provider: LLMProvider, opts: Partial<AgentOptions> = {}) {
+    return new TestAgent('coder', provider, { model: 'm', ...opts });
 }
 
 describe('BaseAgent tool loop', () => {
@@ -24,15 +28,14 @@ describe('BaseAgent tool loop', () => {
             { content: 'thinking', toolCalls: [{ name: 'echo', input: { v: 1 } }, { name: 'echo', input: { v: 2 } }] },
             'final answer',
         ]);
-        const onToolCall = vi.fn(async (call: ToolCall): Promise<ToolResult> => ({
-            callId: call.callId, content: `echo ${JSON.stringify(call.input)}`,
-        }));
+        const { tool, execute } = echoTool();
 
-        const out = await makeAgent(provider, onToolCall).execute({ task: 'do it' });
+        const out = await makeAgent(provider, { tools: new ToolRegistry([tool]) }).execute({ task: 'do it' });
 
         expect(out.content).toBe('final answer');
-        expect(onToolCall).toHaveBeenCalledTimes(2);
+        expect(execute).toHaveBeenCalledTimes(2);
         expect(provider.calls).toHaveLength(2);
+        expect(provider.calls[0]!.options?.tools?.map(t => t.name)).toEqual(['echo']);
 
         const second = provider.calls[1]!.messages;
         expect(second[1]).toMatchObject({ role: 'assistant', content: 'thinking' });
@@ -44,24 +47,53 @@ describe('BaseAgent tool loop', () => {
             ],
         });
         // Tokens are summed across turns
-        expect(out.tokensUsed).toBe(provider.calls.length * 10 + Math.ceil('thinking'.length / 4) + Math.ceil('final answer'.length / 4));
+        expect(out.tokensUsed).toBe(20 + Math.ceil('thinking'.length / 4) + Math.ceil('final answer'.length / 4));
     });
 
-    it('does not send tools when the agent has no tool handler', async () => {
-        const provider = new MockProvider(['plain']);
+    it('does not send tools when the registry is empty or missing', async () => {
+        const provider = new MockProvider(['plain', 'plain']);
         await makeAgent(provider).execute({ task: 't' });
+        await makeAgent(provider, { tools: new ToolRegistry() }).execute({ task: 't' });
         expect(provider.calls[0]!.options?.tools).toBeUndefined();
+        expect(provider.calls[1]!.options?.tools).toBeUndefined();
     });
 
-    it('forces a final answer without tools after the turn limit', async () => {
-        const looping: MockStep = { content: '', toolCalls: [{ name: 'echo', input: {} }] };
-        const provider = new MockProvider([...Array.from({ length: 10 }, () => looping), 'gave up']);
-        const onToolCall = async (call: ToolCall): Promise<ToolResult> => ({ callId: call.callId, content: 'ok' });
+    it('returns unknown-tool errors to the model instead of throwing', async () => {
+        const provider = new MockProvider([{ content: '', toolCalls: [{ name: 'nope', input: {} }] }, 'recovered']);
+        const out = await makeAgent(provider, { tools: new ToolRegistry([echoTool().tool]) }).execute({ task: 't' });
+        expect(out.content).toBe('recovered');
+        expect(provider.calls[1]!.messages[2]).toEqual({ role: 'tool', results: [{ callId: 'call_1_0', content: 'Unknown tool: nope', isError: true }] });
+    });
 
-        const out = await makeAgent(provider, onToolCall).execute({ task: 't' });
+    it('forces a final answer without tools after maxTurns', async () => {
+        const looping: MockStep = { content: '', toolCalls: [{ name: 'echo', input: {} }] };
+        const provider = new MockProvider([looping, looping, looping, 'gave up']);
+
+        const out = await makeAgent(provider, { tools: new ToolRegistry([echoTool().tool]), maxTurns: 3 }).execute({ task: 't' });
 
         expect(out.content).toBe('gave up');
-        expect(provider.calls).toHaveLength(11);
-        expect(provider.calls[10]!.options?.tools).toBeUndefined();
+        expect(provider.calls).toHaveLength(4);
+        expect(provider.calls[3]!.options?.tools).toBeUndefined();
+    });
+
+    it('runs the same loop when streaming and reports tool calls', async () => {
+        const provider = new MockProvider([
+            { content: 'Reading ', toolCalls: [{ name: 'echo', input: { f: 'a' } }] },
+            'done.',
+        ]);
+        const chunks: string[] = [];
+        const calls: ToolCall[] = [];
+        let completed = '';
+
+        const out = await makeAgent(provider, { tools: new ToolRegistry([echoTool().tool]) }).executeStreaming(
+            { task: 't' },
+            { onChunk: c => chunks.push(c), onToolCall: c => calls.push(c), onComplete: t => { completed = t; } },
+        );
+
+        expect(out.content).toBe('done.');
+        expect(chunks).toEqual(['Reading ', 'done.']);
+        expect(calls.map(c => c.name)).toEqual(['echo']);
+        expect(completed).toBe('done.');
+        expect(provider.calls[1]!.messages[2]).toMatchObject({ role: 'tool', results: [{ content: 'echo {"f":"a"}' }] });
     });
 });

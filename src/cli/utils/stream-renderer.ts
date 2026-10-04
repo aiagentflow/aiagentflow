@@ -44,6 +44,17 @@ export function createStreamRenderer(agentRole: AgentRole): {
                 lineLength++;
             }
         },
+        onToolCall(call) {
+            if (!headerPrinted) {
+                process.stdout.write(chalk.bold(`  ${label}: `));
+                headerPrinted = true;
+            }
+            const note = ` [${call.name}]`;
+            if (lineLength + note.length <= PREVIEW_MAX) {
+                process.stdout.write(chalk.cyan(note));
+                lineLength += note.length;
+            }
+        },
         onComplete() {
             if (lineLength > 0 || headerPrinted) {
                 if (lineLength >= PREVIEW_MAX) {
