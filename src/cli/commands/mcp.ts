@@ -11,7 +11,6 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { McpRegistry } from '../../mcp/registry.js';
 import { McpClient } from '../../mcp/client.js';
 import { loadConfig, configExists } from '../../core/config/manager.js';
 import { logger } from '../../utils/logger.js';

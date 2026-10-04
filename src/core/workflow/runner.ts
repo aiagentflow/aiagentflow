@@ -38,6 +38,7 @@ import { loadContextDocuments, formatContextForAgent, loadSourceFiles, formatSou
 import { loadConfig } from '../config/manager.js';
 import { McpRegistry } from '../../mcp/registry.js';
 import type { AppConfig } from '../config/types.js';
+import type { ToolCall } from '../../providers/types.js';
 import { logger } from '../../utils/logger.js';
 import { buildTestCommand } from '../../utils/package-manager.js';
 import { WORKFLOW_PRESETS, type WorkflowMode } from '../config/defaults.js';
@@ -365,7 +366,7 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
             }
 
             const mcpTools = mcpRegistry?.getTools(agentRole) ?? [];
-            const onToolCall = mcpRegistry ? (call: import('../../providers/types.js').ToolCall) => mcpRegistry.executeTool(call) : undefined;
+            const onToolCall = mcpRegistry ? (call: ToolCall) => mcpRegistry.executeTool(call) : undefined;
             const agent = createAgent(agentRole, config, projectRoot, { tools: mcpTools, onToolCall });
             const agentConfig = config.agents[agentRole];
             const spinner = ora(`Running ${agentRole} agent...`).start();

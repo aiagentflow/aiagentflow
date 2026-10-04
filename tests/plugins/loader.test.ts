@@ -50,3 +50,24 @@ describe('PluginRegistry', () => {
         expect(registry.getProvider('nonexistent')).toBeUndefined();
     });
 });
+
+describe('loadPlugin from a local path', () => {
+    it('reads package.json and imports the ESM entry', async () => {
+        const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+        const { join } = await import('node:path');
+        const { tmpdir } = await import('node:os');
+        const { loadPlugin } = await import('../../src/plugins/loader.js');
+
+        const dir = mkdtempSync(join(tmpdir(), 'aiagentflow-plugin-'));
+        try {
+            writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', type: 'module', main: 'index.js' }));
+            writeFileSync(join(dir, 'index.js'), 'export const manifest = { name: "p", version: "1.0.0", type: "agent" };\n');
+
+            const plugin = await loadPlugin(dir);
+            expect(plugin?.manifest.name).toBe('p');
+            expect(plugin?.path).toBe(dir);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});

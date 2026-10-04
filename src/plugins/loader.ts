@@ -9,8 +9,10 @@
  * Used by: plugins/registry.ts
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { logger } from '../utils/logger.js';
 import type { PluginExports, LoadedPlugin } from './types.js';
 import { RESERVED_AGENT_ROLES, RESERVED_PROVIDER_NAMES } from './types.js';
@@ -55,18 +57,18 @@ export async function loadPlugin(pluginPathOrPackage: string): Promise<LoadedPlu
         if (!existsSync(pkgJson)) {
             throw new Error(`No package.json found at ${pluginPathOrPackage}`);
         }
-        const pkg = JSON.parse(require('node:fs').readFileSync(pkgJson, 'utf-8')) as { main?: string };
+        const pkg = JSON.parse(readFileSync(pkgJson, 'utf-8')) as { main?: string };
         entryPath = resolve(pluginPathOrPackage, pkg.main ?? 'index.js');
     } else {
         // npm package — resolve from node_modules
-        entryPath = require.resolve(pluginPathOrPackage);
+        entryPath = createRequire(join(process.cwd(), 'noop.js')).resolve(pluginPathOrPackage);
     }
 
     if (!existsSync(entryPath)) {
         throw new Error(`Plugin entry not found: ${entryPath}`);
     }
 
-    const exports = await import(entryPath) as Partial<PluginExports>;
+    const exports = await import(pathToFileURL(entryPath).href) as Partial<PluginExports>;
 
     if (!exports.manifest) {
         throw new Error(`Plugin at "${entryPath}" does not export a "manifest" object`);
