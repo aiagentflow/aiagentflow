@@ -133,6 +133,7 @@ More: [docs/headless.md](docs/headless.md).
 | `init` | Interactive setup |
 | `run <task>` | Run a workflow (`--workflow`, `--auto`, `--headless`, `--isolate`/`--inplace`, `--review-plan`, `--dry-run`, `--batch`, `--parallel`, `--pr`, `--issue`, budgets, `--output json`) |
 | `review` | Review a diff or PR |
+| `watch` | Re-review your changes (or re-run a task) whenever files change |
 | `resume [session]` | Resume an interrupted run |
 | `sessions` | List saved runs |
 | `runs` | List worktree runs with status and cost |
