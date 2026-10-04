@@ -1,0 +1,65 @@
+name: Evals
+
+# Measures a workflow on the shipped eval suite with real models. Manual only:
+# every run costs tokens. Needs the provider's API key as a repository secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow:
+        description: Workflow to evaluate
+        default: standard
+      provider:
+        description: Provider (anthropic, openai, groq, gemini, openrouter)
+        default: anthropic
+      model:
+        description: "Model (default: the provider default)"
+        default: ""
+      max-cost:
+        description: USD budget per task
+        default: "1"
+      min-pass-rate:
+        description: Fail the job below this pass rate (0 to 1)
+        default: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install && npm run build
+
+      - name: Write a config for the chosen provider
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          MODEL: ${{ inputs.model }}
+        run: node action/write-config.mjs
+
+      - name: Run the eval suite
+        env:
+          WORKFLOW: ${{ inputs.workflow }}
+          MAX_COST: ${{ inputs.max-cost }}
+          MIN_PASS_RATE: ${{ inputs.min-pass-rate }}
+        run: |
+          node dist/cli/index.js eval --workflow "$WORKFLOW" --max-cost "$MAX_COST" \
+            --min-pass-rate "$MIN_PASS_RATE" --report eval-report.json | tee eval-table.txt
+          { echo '```'; cat eval-table.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: eval-report.json

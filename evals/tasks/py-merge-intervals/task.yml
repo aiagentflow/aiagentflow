@@ -1,0 +1,7 @@
+id: py-merge-intervals
+language: python
+testFramework: unittest
+prompt: |
+  Implement `merge(intervals)` in app/intervals.py: merge overlapping or touching [start, end] intervals and return them sorted by start. The input may be unsorted; do not modify it.
+test: python3 -m unittest discover -s tests -t .
+check: python3 -m unittest discover -s hidden -t .

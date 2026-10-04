@@ -1,0 +1,7 @@
+id: py-word-frequency
+language: python
+testFramework: unittest
+prompt: |
+  Implement `top_words(text, n)` in app/words.py: return the n most common words as (word, count) tuples, most common first, ties broken alphabetically. Words are case-insensitive and punctuation is ignored, but apostrophes inside words are kept ("don't").
+test: python3 -m unittest discover -s tests -t .
+check: python3 -m unittest discover -s hidden -t .

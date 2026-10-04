@@ -1,0 +1,7 @@
+id: py-median-bug
+language: python
+testFramework: unittest
+prompt: |
+  `median(values)` in app/stats.py returns the wrong answer for lists with an even number of items and fails on unsorted input. Fix it. It should raise ValueError for an empty list.
+test: python3 -m unittest discover -s tests -t .
+check: python3 -m unittest discover -s hidden -t .

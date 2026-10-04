@@ -27,6 +27,7 @@ import { memoryCommand } from './commands/memory.js';
 import { workflowCommand } from './commands/workflow.js';
 import { reviewCommand } from './commands/review.js';
 import { migrateCommand } from './commands/migrate.js';
+import { evalCommand } from './commands/eval.js';
 
 const program = new Command();
 
@@ -55,5 +56,6 @@ program.addCommand(memoryCommand);
 program.addCommand(workflowCommand);
 program.addCommand(reviewCommand);
 program.addCommand(migrateCommand);
+program.addCommand(evalCommand);
 
 program.parse();
