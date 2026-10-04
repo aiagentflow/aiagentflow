@@ -46,6 +46,8 @@ export interface ReviewCommandOptions extends BudgetFlags {
     stream: boolean;
     /** Receives run events (when not using --output json). */
     events?: EventBus;
+    /** Stops the review before its next step (used by watch mode). */
+    signal?: AbortSignal;
 }
 
 export const reviewCommand = addBudgetOptions(new Command('review')
@@ -120,6 +122,7 @@ async function reviewInner(options: ReviewCommandOptions, projectRoot: string): 
             streaming: options.stream && options.output !== 'json',
             events,
             budget: budgetFromFlags(options),
+            ...(options.signal ? { signal: options.signal } : {}),
             contextDocuments: [{ source: diff.label, name: `Diff under review (${diff.label})`, content: diffForPrompt(diff.diff) }],
             initialContext: { generatedFiles: diff.files, changeSummary: describeChange(diff) },
             showSummary: options.output !== 'json',
