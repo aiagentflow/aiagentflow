@@ -50,11 +50,14 @@ const pluginList = new Command('list')
                 console.log(chalk.gray(`    ${manifest.description}`));
             }
 
-            if (plugin.agents.length > 0) {
-                console.log(chalk.gray(`    Agents: ${plugin.agents.map(a => a.role).join(', ')}`));
+            if (plugin.tools.length > 0) {
+                console.log(chalk.gray(`    Tools: ${plugin.tools.map(t => t.definition.name).join(', ')}`));
             }
             if (plugin.providers.length > 0) {
                 console.log(chalk.gray(`    Providers: ${plugin.providers.map(p => p.name).join(', ')}`));
+            }
+            if (plugin.steps.length > 0) {
+                console.log(chalk.gray(`    Steps: ${plugin.steps.map(s => `${manifest.name}/${s.name}`).join(', ')}`));
             }
             console.log();
         }

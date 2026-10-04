@@ -45,6 +45,17 @@ describe('parseWorkflow', () => {
         expect(message).toContain('steps[1].onFail: unknown step "nowhere"');
     });
 
+    it('accepts plugin steps and checks agent/uses exclusivity', () => {
+        const wf = parseWorkflow(minimal('  - id: lint\n    uses: no-todos/no-todos\n    with:\n      pattern: TODO\n    onFail: fix\n  - id: fix\n    agent: fixer\n    trigger: on-fail\n'), 'x');
+        expect(wf.steps[0]).toMatchObject({ uses: 'no-todos/no-todos', with: { pattern: 'TODO' } });
+
+        const both = errorOf(minimal('  - id: a\n    agent: coder\n    uses: p/s\n'));
+        expect(both).toContain('steps[0]: needs exactly one of "agent" or "uses"');
+        expect(errorOf(minimal('  - id: a\n    uses: p/s\n    gate: verdict\n    onFail: a\n'))).toContain('a plugin step does not return a verdict');
+        expect(errorOf(minimal('  - id: a\n    agent: coder\n    with:\n      x: 1\n'))).toContain('only applies to plugin steps');
+        expect(errorOf(minimal('  - id: a\n    uses: no-slash\n'))).toContain('must be "<plugin-name>/<step-name>"');
+    });
+
     it('rejects invalid YAML and workflows with only on-fail steps', () => {
         expect(() => parseWorkflow('name: [', 'x.yml')).toThrow('x.yml: invalid YAML');
         expect(() => parseWorkflow(minimal('  - id: fix\n    agent: fixer\n    trigger: on-fail\n'), 'x')).toThrow('at least one step');
@@ -73,7 +84,7 @@ describe('built-in standard workflow', () => {
         // v1 state machine happy path: idle → plan_approved → code_generated → review_done → security_checked → tests_passed
         const v1Happy = ['architect', 'coder', 'reviewer', 'security', 'tester', 'judge'];
         const v2Happy: string[] = [];
-        for (let s: WorkflowDefinition['steps'][number] | undefined = firstStep(wf); s; s = nextStep(wf, s)) v2Happy.push(s.agent);
+        for (let s: WorkflowDefinition['steps'][number] | undefined = firstStep(wf); s; s = nextStep(wf, s)) v2Happy.push(s.agent!);
         expect(v2Happy).toEqual(v1Happy);
     });
 

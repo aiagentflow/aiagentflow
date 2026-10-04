@@ -7,7 +7,8 @@
  * fails the run if the step has none; otherwise it continues to `next`
  * (default: the following step).
  * Steps marked `trigger: on-fail` are skipped in normal order and only run
- * when another step routes to them (e.g. the fixer).
+ * when another step routes to them (e.g. the fixer). A step runs either an
+ * agent or a plugin step (`uses: <plugin>/<step>`).
  *
  * Definitions live in `.aiagentflow/workflows/*.yml`; built-ins ship with the
  * CLI and can be overridden by a project file with the same name.
@@ -30,8 +31,12 @@ const stepIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/, 'must be lowercase le
 export const workflowStepSchema = z.object({
     /** Unique step id, used by onFail / next. */
     id: stepIdSchema,
-    /** Agent role that runs this step. */
-    agent: z.enum(ALL_AGENT_ROLES as unknown as [AgentRole, ...AgentRole[]]),
+    /** Agent role that runs this step (or use `uses` for a plugin step). */
+    agent: z.enum(ALL_AGENT_ROLES as unknown as [AgentRole, ...AgentRole[]]).optional(),
+    /** Plugin step to run instead of an agent: `<plugin-name>/<step-name>`. */
+    uses: z.string().regex(/^[a-z0-9@][a-z0-9@._/-]*\/[a-z][a-z0-9-]*$/, 'must be "<plugin-name>/<step-name>"').optional(),
+    /** Options passed to a plugin step. */
+    with: z.record(z.unknown()).optional(),
     /** Shown in `workflow show` and dry runs. */
     description: z.string().optional(),
     /** `on-fail` steps run only when another step routes to them. */
@@ -72,8 +77,17 @@ export const workflowDefinitionSchema = z.object({
                 ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, key], message: `unknown step "${target}"` });
             }
         }
-        if (step.gate === 'verdict' && !['reviewer', 'security', 'judge'].includes(step.agent)) {
-            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'gate'], message: `agent "${step.agent}" does not return a verdict` });
+        if ((step.agent === undefined) === (step.uses === undefined)) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i], message: 'needs exactly one of "agent" or "uses"' });
+        }
+        if (step.gate === 'verdict' && !['reviewer', 'security', 'judge'].includes(step.agent ?? '')) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'gate'], message: `${step.agent ? `agent "${step.agent}"` : 'a plugin step'} does not return a verdict` });
+        }
+        if (step.uses && step.maxTurns !== undefined) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'maxTurns'], message: 'only applies to agent steps' });
+        }
+        if (step.agent && step.with !== undefined) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'with'], message: 'only applies to plugin steps ("uses")' });
         }
     });
 
@@ -125,4 +139,9 @@ export function stepById(wf: WorkflowDefinition, id: string): WorkflowStep | und
 
 function formatPath(path: ReadonlyArray<string | number>): string {
     return path.length === 0 ? '(root)' : path.map(p => (typeof p === 'number' ? `[${p}]` : `.${p}`)).join('').replace(/^\./, '');
+}
+
+/** Display name of what a step runs: the agent role or the plugin step reference. */
+export function stepRunner(step: WorkflowStep): string {
+    return step.agent ?? step.uses ?? '?';
 }

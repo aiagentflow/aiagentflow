@@ -486,4 +486,54 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             expect(ctx.status).toBe('passed');
         });
     });
+
+    describe('plugins', () => {
+        it('runs a plugin step that gates the workflow and gives agents plugin tools', async () => {
+            dir = setupProject();
+            const { cpSync } = await import('node:fs');
+            cpSync(join(__dirname, '..', '..', '..', 'examples', 'plugin-no-todos'), join(dir, '.aiagentflow', 'plugins', 'no-todos'), { recursive: true });
+            mkdirSync(join(dir, '.aiagentflow', 'workflows'), { recursive: true });
+            writeFileSync(join(dir, '.aiagentflow', 'workflows', 'clean.yml'), [
+                'name: clean',
+                'steps:',
+                '  - id: implement',
+                '    agent: coder',
+                '  - id: todos',
+                '    uses: no-todos/no-todos',
+                '    onFail: fix',
+                '  - id: fix',
+                '    agent: fixer',
+                '    trigger: on-fail',
+                '    next: todos',
+                '',
+            ].join('\n'));
+            const provider = new MockProvider([
+                { content: '', toolCalls: [{ name: 'write_file', input: { path: 'src/app.ts', content: '// TODO: validate input\nexport const app = 1;\n' } }] },
+                'Created src/app.ts.',
+                { content: '', toolCalls: [{ name: 'edit_file', input: { path: 'src/app.ts', old_string: '// TODO: validate input\n', new_string: '' } }] },
+                'Removed the TODO.',
+            ]);
+            holder.provider = provider;
+
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Build', workflow: 'clean', auto: true, streaming: false, isolation: 'inplace', showSummary: false });
+
+            expect(ctx.status).toBe('passed');
+            expect(ctx.history.map(h => `${h.step}:${h.outcome}`)).toEqual(['implement:passed', 'todos:failed', 'fix:passed', 'todos:passed']);
+            // The fixer was told exactly what to remove
+            expect(provider.userPrompt(2)).toContain('src/app.ts:1: // TODO: validate input');
+            // Plugin tools reach the roles they target
+            expect(provider.calls[0]!.options?.tools?.map(t => t.name)).toContain('list_todos');
+        });
+
+        it('fails before starting when a plugin step is missing', async () => {
+            dir = setupProject();
+            mkdirSync(join(dir, '.aiagentflow', 'workflows'), { recursive: true });
+            writeFileSync(join(dir, '.aiagentflow', 'workflows', 'ghost.yml'), 'name: ghost\nsteps:\n  - id: x\n    uses: nope/step\n');
+            holder.provider = new MockProvider([]);
+
+            await expect(runWorkflow({ projectRoot: dir, task: 'Build', workflow: 'ghost', auto: true, streaming: false, isolation: 'inplace', showSummary: false }))
+                .rejects.toThrow('uses unknown plugin step(s): nope/step');
+            expect(listSessions(dir)).toHaveLength(0);
+        });
+    });
 });

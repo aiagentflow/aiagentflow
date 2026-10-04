@@ -19,7 +19,7 @@ import type { RunStatus, StepRecord } from './workflow/engine.js';
 /** Every event a run can emit. */
 export type RunEvent =
     | { type: 'run.started'; sessionId: string; task: string; workflow: string; resumed: boolean }
-    | { type: 'step.started'; step: string; agent: AgentRole }
+    | { type: 'step.started'; step: string; agent?: AgentRole; uses?: string }
     | { type: 'tool.called'; step: string; agent: AgentRole; tool: string; input: Record<string, unknown> }
     | { type: 'tool.result'; step: string; agent: AgentRole; tool: string; isError: boolean }
     | { type: 'check.finished'; step: string; check: 'lint' | 'test'; passed: boolean }
@@ -27,7 +27,9 @@ export type RunEvent =
     | {
         type: 'step.finished';
         step: string;
-        agent: AgentRole;
+        /** The agent the step ran, or `uses` for a plugin step. */
+        agent?: AgentRole;
+        uses?: string;
         outcome: StepRecord['outcome'];
         detail?: string;
         usage?: TokenUsage;
@@ -112,7 +114,7 @@ export function describeEvent(event: RunEvent): string {
         case 'run.started':
             return `${event.resumed ? 'Resumed' : 'Started'} ${event.workflow}: ${event.task.split('\n')[0]}`;
         case 'step.started':
-            return `${event.step} (${event.agent}) started`;
+            return `${event.step} (${event.agent ?? event.uses}) started`;
         case 'tool.called':
             return `${event.step}: ${event.tool}${summarizeInput(event.input)}`;
         case 'tool.result':

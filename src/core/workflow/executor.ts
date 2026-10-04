@@ -26,13 +26,14 @@ import { buildTestCommand } from '../../utils/package-manager.js';
 import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
 import { confirmCommand } from '../../cli/utils/confirm-command.js';
 import { failRun, mergeFiles, type FailureKind, type StepRecord, type WorkflowContext } from './engine.js';
-import { nextStep, stepById, type WorkflowDefinition, type WorkflowStep } from './definition.js';
+import { nextStep, stepById, stepRunner, type WorkflowDefinition, type WorkflowStep } from './definition.js';
 import { parseAndWriteFiles } from './file-parser.js';
 import { runTests } from './test-runner.js';
 import { runLint, runFormat } from './lint-runner.js';
 import { requestApproval, requestStepReview, isApprovalGated } from './approval.js';
 import { costOf, type TokenTracker } from './token-tracker.js';
 import type { EventBus } from '../events.js';
+import type { PluginRegistry } from '../../plugins/registry.js';
 import { formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
 import { formatContextForAgent, formatSourcesForAgent, type ContextDocument } from './context-loader.js';
 import { buildRepoMap } from './repo-map.js';
@@ -53,6 +54,8 @@ export interface ExecutorParams {
     mcpRegistry?: McpRegistry;
     /** Receives run events (steps, tools, checks, verdicts). */
     events?: EventBus;
+    /** Loaded plugins: their tools, steps, and providers. */
+    plugins?: PluginRegistry;
     /** Token, cost, and time caps for this run. */
     budget?: BudgetLimits;
     /** When the run started (for the time budget); defaults to now. */
@@ -99,11 +102,13 @@ export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowC
 
         let result: StepResult;
         try {
-            result = await runStep(step, ctx, params, startedAt);
+            result = step.agent
+                ? await runAgentStep(step as AgentStep, ctx, params, startedAt)
+                : await runPluginStep(step, ctx, params);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             logger.error(message);
-            if (err instanceof BudgetExceededError) {
+            if (err instanceof BudgetExceededError && step.agent) {
                 // Count what the interrupted agent spent before it was stopped
                 const usage = err.context?.usage as TokenUsage | undefined;
                 if (usage) params.tokenTracker.record(step.agent, config.agents[step.agent].model, usage);
@@ -119,16 +124,16 @@ export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowC
         params.events?.emit({
             type: 'step.finished',
             step: step.id,
-            agent: step.agent,
+            ...stepIdentity(step),
             outcome: record.outcome,
             ...(record.detail ? { detail: record.detail } : {}),
-            ...(usage ? { usage, costUsd: costOf({ model: config.agents[step.agent].model, ...usage }) } : {}),
+            ...(usage && step.agent ? { usage, costUsd: costOf({ model: config.agents[step.agent].model, ...usage }) } : {}),
         });
         params.onStep?.(ctx);
 
         // Optional human checkpoint between steps
         if (config.workflow.humanApproval && !auto && ctx.status === 'running' && result.output) {
-            const decision = await requestApproval(ctx, AGENT_ROLE_LABELS[step.agent], result.output.content);
+            const decision = await requestApproval(ctx, step.agent ? AGENT_ROLE_LABELS[step.agent] : stepRunner(step), result.output.content);
             if (decision === 'abort') {
                 ctx = failRun(ctx, 'User aborted', 'aborted');
             } else if (decision === 'retry') {
@@ -145,7 +150,7 @@ export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowC
 /** Record the step and decide what runs next. */
 function route(ctx: WorkflowContext, step: WorkflowStep, workflow: WorkflowDefinition, result: StepResult): WorkflowContext {
     const record = (outcome: StepRecord['outcome'], detail?: string): StepRecord => ({
-        step: step.id, agent: step.agent, outcome, ...(detail ? { detail: firstLine(detail) } : {}), timestamp: Date.now(),
+        step: step.id, ...stepIdentity(step), outcome, ...(detail ? { detail: firstLine(detail) } : {}), timestamp: Date.now(),
     });
 
     if (result.abort) {
@@ -174,7 +179,42 @@ function route(ctx: WorkflowContext, step: WorkflowStep, workflow: WorkflowDefin
 
 // ── Running one step ──
 
-async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorParams, startedAt: number): Promise<StepResult> {
+/** A step that runs an agent (as opposed to a plugin step). */
+type AgentStep = WorkflowStep & { agent: AgentRole };
+
+/** The agent or plugin step a step runs, for events and history. */
+function stepIdentity(step: WorkflowStep): { agent?: AgentRole; uses?: string } {
+    return step.agent ? { agent: step.agent } : { uses: step.uses };
+}
+
+/** Run a plugin step; a result with passed: false is a failure like a failed check. */
+async function runPluginStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorParams): Promise<StepResult> {
+    const ref = step.uses!;
+    const pluginStep = p.plugins?.step(ref);
+    if (!pluginStep) {
+        throw new WorkflowError(`Unknown plugin step "${ref}". Is its plugin installed in .aiagentflow/plugins/?`, { step: step.id });
+    }
+
+    p.events?.emit({ type: 'step.started', step: step.id, uses: ref });
+    logger.info(`Running ${step.id} (${ref})...`);
+    const result = await pluginStep.run({
+        projectRoot: p.projectRoot,
+        task: ctx.task,
+        changedFiles: [...ctx.generatedFiles, ...ctx.testFiles],
+        with: step.with ?? {},
+        log: message => logger.info(`[${ref}] ${message}`),
+    });
+
+    const next = { ...ctx, generatedFiles: mergeFiles(ctx.generatedFiles, result.files ?? []) };
+    if (!result.passed) {
+        const failure = `${ref} failed:\n\n${result.summary}`;
+        return { ctx: { ...next, lastFailure: failure }, failure };
+    }
+    logger.success(`${step.id}: ${result.summary}`);
+    return runChecks(next, step, p);
+}
+
+async function runAgentStep(step: AgentStep, ctx: WorkflowContext, p: ExecutorParams, startedAt: number): Promise<StepResult> {
     const { config, projectRoot, auto, streaming } = p;
     const label = AGENT_ROLE_LABELS[step.agent];
     p.events?.emit({ type: 'step.started', step: step.id, agent: step.agent });
@@ -182,7 +222,7 @@ async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorPara
     const changes = new ChangeSet();
 
     const agent = createAgent(step.agent, config, projectRoot, {
-        tools: p.mcpRegistry?.toolsFor(step.agent),
+        tools: [...(p.mcpRegistry?.toolsFor(step.agent) ?? []), ...(p.plugins?.toolsFor(step.agent) ?? [])],
         changes,
         maxTurns: step.maxTurns,
         onTurn: p.budget ? (usage) => {
@@ -249,7 +289,7 @@ async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorPara
 }
 
 /** Update the run context from an agent's output; a negative gated verdict is a failure. */
-function applyOutput(ctx: WorkflowContext, step: WorkflowStep, output: AgentOutput, changes: ChangeSet, p: ExecutorParams): StepResult {
+function applyOutput(ctx: WorkflowContext, step: AgentStep, output: AgentOutput, changes: ChangeSet, p: ExecutorParams): StepResult {
     const { content } = output;
 
     switch (step.agent) {
