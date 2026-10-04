@@ -582,4 +582,62 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             expect(existsSync(join(dir, 'src', 'app.ts'))).toBe(true);
         });
     });
+
+    describe('external agent steps', () => {
+        it('delegates coding and fixing to an external CLI while aiagentflow runs the gates', async () => {
+            dir = setupProject({ requireFix: true });
+            const { chmodSync } = await import('node:fs');
+            const fake = join(dir, '..', `fake-claude-${Date.now()}.cjs`);
+            writeFileSync(fake, [
+                '#!/usr/bin/env node',
+                "const fs = require('fs');",
+                "const prompt = process.argv[process.argv.indexOf('-p') + 1];",
+                "fs.appendFileSync(process.env.PROMPT_LOG, prompt + '\\n=====\\n');",
+                "if (prompt.includes('## What to fix')) fs.writeFileSync('src/fixed.ts', 'export const fixed = true;\\n');",
+                "else fs.writeFileSync('src/app.ts', 'export const app = 1;\\n');",
+                "console.log(JSON.stringify({ result: 'Done.', total_cost_usd: 0.12, usage: { input_tokens: 10, output_tokens: 5 } }));",
+            ].join('\n'));
+            chmodSync(fake, 0o755);
+            const promptLog = join(dir, '..', `prompts-${Date.now()}.log`);
+            vi.stubEnv('PROMPT_LOG', promptLog);
+
+            mkdirSync(join(dir, '.aiagentflow', 'workflows'), { recursive: true });
+            writeFileSync(join(dir, '.aiagentflow', 'workflows', 'delegated.yml'), [
+                'name: delegated',
+                'steps:',
+                '  - id: implement',
+                '    agent: coder',
+                '    external:',
+                '      cli: claude-code',
+                `      bin: ${fake}`,
+                '  - id: test',
+                '    agent: tester',
+                '    checks: [test]',
+                '    onFail: fix',
+                '  - id: fix',
+                '    agent: fixer',
+                '    trigger: on-fail',
+                '    external:',
+                '      cli: claude-code',
+                `      bin: ${fake}`,
+                '    next: test',
+                '',
+            ].join('\n'));
+            // Only the built-in tester calls the (mock) provider
+            holder.provider = new MockProvider(['No new tests needed.', 'Still fine.']);
+
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Build the app', workflow: 'delegated', auto: true, streaming: false, isolation: 'inplace', showSummary: false });
+            vi.unstubAllEnvs();
+
+            expect(ctx.status).toBe('passed');
+            expect(ctx.history.map(h => `${h.step}:${h.outcome}`)).toEqual(['implement:passed', 'test:failed', 'fix:passed', 'test:passed']);
+            expect(ctx.generatedFiles).toEqual(expect.arrayContaining(['src/app.ts', 'src/fixed.ts']));
+            expect(ctx.external?.map(r => r.files)).toEqual([['src/app.ts'], ['src/fixed.ts']]);
+            // The gate failure went back to the external agent
+            const prompts = readFileSync(promptLog, 'utf-8').split('=====');
+            expect(prompts[1]).toContain('expected src/fixed.ts to exist');
+            // The CLI's own cost is counted
+            expect(ctx.usage?.costUsd).toBeCloseTo(0.24, 6);
+        });
+    });
 });

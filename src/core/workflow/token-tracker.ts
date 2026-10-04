@@ -26,6 +26,8 @@ export interface TokenUsageEntry {
     cacheReadTokens?: number;
     /** Input tokens written to the prompt cache (subset of promptTokens). */
     cacheWriteTokens?: number;
+    /** Cost reported by the runner itself (e.g. an external agent CLI); overrides the pricing table. */
+    costUsd?: number;
     timestamp: number;
 }
 
@@ -100,7 +102,8 @@ export const COST_PER_1M_TOKENS: Record<string, ModelPricing> = {
  * Estimated USD cost of one usage entry, or 0 for unknown models.
  * Cached input is priced at the cache rates; the rest at the input rate.
  */
-export function costOf(entry: Pick<TokenUsageEntry, 'model' | 'promptTokens' | 'completionTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>): number {
+export function costOf(entry: Pick<TokenUsageEntry, 'model' | 'promptTokens' | 'completionTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'costUsd'>): number {
+    if (entry.costUsd !== undefined) return entry.costUsd;
     if (entry.model.endsWith(':free')) return 0;
     const pricing = COST_PER_1M_TOKENS[entry.model];
     if (!pricing) return 0;
@@ -128,6 +131,7 @@ export class TokenTracker {
         role: AgentRole,
         model: string,
         usage: TokenUsage,
+        costUsd?: number,
     ): void {
         this.entries.push({
             role,
@@ -137,6 +141,7 @@ export class TokenTracker {
             totalTokens: usage.totalTokens,
             ...(usage.cacheReadTokens ? { cacheReadTokens: usage.cacheReadTokens } : {}),
             ...(usage.cacheWriteTokens ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+            ...(costUsd !== undefined ? { costUsd } : {}),
             timestamp: Date.now(),
         });
     }

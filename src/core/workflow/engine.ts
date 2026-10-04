@@ -38,6 +38,17 @@ export interface StepRecord {
     timestamp: number;
 }
 
+/** One step handed to an external agent CLI. */
+export interface ExternalRunRecord {
+    step: string;
+    cli: string;
+    files: string[];
+    /** `git diff` of the changes (truncated). */
+    diff: string;
+    costUsd?: number;
+    durationMs: number;
+}
+
 /** All accumulated data during a workflow run. */
 export interface WorkflowContext {
     /** The original task description. */
@@ -77,6 +88,8 @@ export interface WorkflowContext {
     testFailures?: string;
     /** Previous check failure outputs (for detecting repeated errors). */
     previousFailures: string[];
+    /** Steps run by an external agent CLI, with what they changed. */
+    external?: ExternalRunRecord[];
     /** Latest structured verdict from each judging agent. */
     verdicts?: Partial<Record<VerdictRole, Verdict>>;
     /** Every executed step, in order. */
