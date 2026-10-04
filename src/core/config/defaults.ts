@@ -53,6 +53,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         testFramework: 'vitest',
         sourceGlobs: ['src/**/*.ts'],
         testGlobs: ['tests/**/*.test.ts'],
+        repoMapTokens: 4000,
     },
 
     workflow: {

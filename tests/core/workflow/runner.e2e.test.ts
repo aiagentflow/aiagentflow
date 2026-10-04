@@ -99,6 +99,18 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
         expect(coderPrompt).toContain('Create src/app.ts');
     });
 
+    it('gives agents a repo map instead of full source files', async () => {
+        dir = setupProject();
+        writeFileSync(join(dir, 'src', 'existing.ts'), 'export function existingHelper() { return 42; }\n');
+        const { provider } = await run(dir, [PLAN, CODE, 'APPROVE', 'PASS', TESTS, 'PASS']);
+
+        const coderPrompt = provider.userPrompt(1);
+        expect(coderPrompt).toContain('## Repository Map');
+        expect(coderPrompt).toContain('existing.ts: fn existingHelper');
+        expect(coderPrompt).not.toContain('return 42');
+        expect(coderPrompt).not.toContain('## Existing Source Files');
+    });
+
     it('routes a rejected review through the fixer and back to review', async () => {
         dir = setupProject();
         const { ctx } = await run(dir, [

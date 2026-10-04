@@ -117,6 +117,8 @@ export const projectConfigSchema = z.object({
     sourceGlobs: z.array(z.string()).default(['src/**/*.ts']),
     /** Glob patterns for test files. */
     testGlobs: z.array(z.string()).default(['tests/**/*.test.ts']),
+    /** Token budget for the repository map given to agents (0 disables it). */
+    repoMapTokens: z.number().int().min(0).max(50_000).default(4000),
 });
 
 /**
