@@ -39,9 +39,9 @@ export const VERSION = "1.0";
 
         const files = parseFiles(output);
         expect(files).toHaveLength(2);
-        expect(files[0].path).toBe('src/hello.ts');
-        expect(files[0].content).toContain('hello()');
-        expect(files[1].path).toBe('src/utils.ts');
+        expect(files[0]!.path).toBe('src/hello.ts');
+        expect(files[0]!.content).toContain('hello()');
+        expect(files[1]!.path).toBe('src/utils.ts');
     });
 
     it('returns empty array when no file blocks found', () => {
@@ -56,7 +56,7 @@ console.log("hi");
 
         const files = parseFiles(output);
         expect(files).toHaveLength(1);
-        expect(files[0].path).toBe('src/index.ts');
+        expect(files[0]!.path).toBe('src/index.ts');
     });
 
     it('parses code blocks with // filename.ts comment on first line', () => {
@@ -71,8 +71,8 @@ export function hello(name: string): string {
 
         const files = parseFiles(output);
         expect(files).toHaveLength(1);
-        expect(files[0].path).toBe('hello.ts');
-        expect(files[0].content).toContain('hello(name');
+        expect(files[0]!.path).toBe('hello.ts');
+        expect(files[0]!.content).toContain('hello(name');
     });
 
     it('parses code blocks with # filename.py comment on first line', () => {
@@ -84,7 +84,7 @@ def greet(name):
 
         const files = parseFiles(output);
         expect(files).toHaveLength(1);
-        expect(files[0].path).toBe('utils.py');
+        expect(files[0]!.path).toBe('utils.py');
     });
 
     it('parses markdown heading with filename before code block', () => {
@@ -95,7 +95,7 @@ export function greet() { return "hi"; }
 
         const files = parseFiles(output);
         expect(files).toHaveLength(1);
-        expect(files[0].path).toBe('src/greet.ts');
+        expect(files[0]!.path).toBe('src/greet.ts');
     });
 
     it('parses inline backtick filename reference before code block', () => {
@@ -107,7 +107,7 @@ export function greet(name: string) { return "Hello " + name; }
 
         const files = parseFiles(output);
         expect(files).toHaveLength(1);
-        expect(files[0].path).toBe('src/greet.ts');
+        expect(files[0]!.path).toBe('src/greet.ts');
     });
 });
 
