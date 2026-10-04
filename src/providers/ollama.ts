@@ -20,6 +20,7 @@ import type {
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import { fetchWithRetry, OLLAMA_TIMEOUT_MS } from './provider-errors.js';
+import { normalizeStopReason, toPlainMessages } from './messages.js';
 
 /** Configuration required to create an Ollama provider. */
 export interface OllamaProviderConfig {
@@ -74,6 +75,8 @@ export class OllamaProvider implements LLMProvider {
             model: (response.model as string) ?? model,
             usage: this.extractUsage(response),
             finishReason: (response.done_reason as string) ?? 'stop',
+            stopReason: normalizeStopReason((response.done_reason as string) ?? 'stop'),
+            toolCalls: [],
         };
     }
 
@@ -190,7 +193,7 @@ export class OllamaProvider implements LLMProvider {
             result.push({ role: 'system', content: options.systemPrompt });
         }
 
-        for (const msg of messages) {
+        for (const msg of toPlainMessages(messages)) {
             result.push({ role: msg.role, content: msg.content });
         }
 
