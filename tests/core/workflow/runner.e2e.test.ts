@@ -27,6 +27,15 @@ const CODE = 'FILE: src/app.ts\n```ts\nexport const app = 1;\n```';
 const TESTS = 'FILE: tests/app.test.ts\n```ts\nimport { app } from "../src/app";\n```';
 const FIX = 'FILE: src/fixed.ts\n```ts\nexport const fixed = true;\n```';
 
+/** A turn where a judging agent submits its verdict through the tool. */
+const verdict = (value: string, issues: object[] = []): MockStep => ({
+    content: '',
+    toolCalls: [{ name: 'submit_verdict', input: { verdict: value, summary: `Verdict: ${value}`, issues } }],
+});
+const APPROVE = verdict('approve');
+const REJECT = verdict('request_changes', [{ severity: 'high', message: 'rename app', file: 'src/app.ts' }]);
+const PASS = verdict('pass');
+
 function setupProject(overrides: { maxIterations?: number; requireFix?: boolean } = {}): string {
     const dir = mkdtempSync(join(tmpdir(), 'aiagentflow-e2e-'));
     mkdirSync(join(dir, '.aiagentflow'), { recursive: true });
@@ -79,7 +88,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
 
     it('runs the happy path to QA approval and writes files', async () => {
         dir = setupProject();
-        const { ctx, provider } = await run(dir, [PLAN, CODE, 'APPROVE', 'PASS', TESTS, 'PASS']);
+        const { ctx, provider } = await run(dir, [PLAN, CODE, APPROVE, PASS, TESTS, PASS]);
 
         expect(ctx.state).toBe('qa_approved');
         expect(provider.remaining).toBe(0);
@@ -93,7 +102,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
 
     it('passes the plan to the coder', async () => {
         dir = setupProject();
-        const { provider } = await run(dir, [PLAN, CODE, 'APPROVE', 'PASS', TESTS, 'PASS']);
+        const { provider } = await run(dir, [PLAN, CODE, APPROVE, PASS, TESTS, PASS]);
 
         const coderPrompt = provider.userPrompt(1);
         expect(coderPrompt).toContain('Create src/app.ts');
@@ -102,7 +111,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
     it('gives agents a repo map instead of full source files', async () => {
         dir = setupProject();
         writeFileSync(join(dir, 'src', 'existing.ts'), 'export function existingHelper() { return 42; }\n');
-        const { provider } = await run(dir, [PLAN, CODE, 'APPROVE', 'PASS', TESTS, 'PASS']);
+        const { provider } = await run(dir, [PLAN, CODE, APPROVE, PASS, TESTS, PASS]);
 
         const coderPrompt = provider.userPrompt(1);
         expect(coderPrompt).toContain('## Repository Map');
@@ -114,7 +123,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
     it('routes a rejected review through the fixer and back to review', async () => {
         dir = setupProject();
         const { ctx } = await run(dir, [
-            PLAN, CODE, 'REQUEST_CHANGES: rename app', FIX, 'APPROVE', 'PASS', TESTS, 'PASS',
+            PLAN, CODE, REJECT, FIX, APPROVE, PASS, TESTS, PASS,
         ]);
 
         expect(ctx.state).toBe('qa_approved');
@@ -125,8 +134,8 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
     it('routes a test failure to the fixer, which makes tests pass', async () => {
         dir = setupProject({ requireFix: true });
         const { ctx, provider } = await run(dir, [
-            PLAN, CODE, 'APPROVE', 'PASS', TESTS,
-            FIX, 'APPROVE', 'PASS', TESTS, 'PASS',
+            PLAN, CODE, APPROVE, PASS, TESTS,
+            FIX, APPROVE, PASS, TESTS, PASS,
         ]);
 
         expect(ctx.state).toBe('qa_approved');
@@ -138,14 +147,14 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
 
     it('fails once max iterations are exceeded', async () => {
         dir = setupProject({ maxIterations: 2 });
-        const { ctx } = await run(dir, [PLAN, CODE, 'REJECT', FIX, 'REJECT']);
+        const { ctx } = await run(dir, [PLAN, CODE, REJECT, FIX, REJECT]);
 
         expect(ctx.state).toBe('failed');
     });
 
     it('saves a session for the run', async () => {
         dir = setupProject();
-        await run(dir, [PLAN, CODE, 'APPROVE', 'PASS', TESTS, 'PASS']);
+        await run(dir, [PLAN, CODE, APPROVE, PASS, TESTS, PASS]);
 
         const sessions = listSessions(dir);
         expect(sessions).toHaveLength(1);
@@ -163,8 +172,8 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
                 'Created src/app.ts.',
                 // Reviewer reads the changed file
                 { content: '', toolCalls: [{ name: 'read_file', input: { path: 'src/app.ts' } }] },
-                'APPROVE',
-                'PASS',
+                APPROVE,
+                PASS,
                 // Tester writes a test and runs the allowed test command (fails: src/fixed.ts missing)
                 { content: '', toolCalls: [
                     { name: 'write_file', input: { path: 'tests/app.test.ts', content: 'test\n' } },
@@ -174,10 +183,10 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
                 // Fixer edits via tools
                 { content: '', toolCalls: [{ name: 'write_file', input: { path: 'src/fixed.ts', content: 'export const fixed = true;\n' } }] },
                 'Root cause: missing module. Fix: created src/fixed.ts.',
-                'APPROVE', 'PASS',
+                APPROVE, PASS,
                 { content: '', toolCalls: [{ name: 'edit_file', input: { path: 'tests/app.test.ts', old_string: 'test', new_string: 'test 2' } }] },
                 'Updated tests.',
-                'PASS',
+                PASS,
             ]);
 
             expect(ctx.state).toBe('qa_approved');
@@ -199,11 +208,60 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             const { provider } = await run(dir, [
                 PLAN,
                 { content: '', toolCalls: [{ name: 'run_command', input: { command: 'touch pwned.txt' } }] },
-                CODE, 'APPROVE', 'PASS', TESTS, 'PASS',
+                CODE, APPROVE, PASS, TESTS, PASS,
             ]);
 
             expect(provider.calls[2]!.messages[2]).toMatchObject({ role: 'tool', results: [{ isError: true, content: expect.stringContaining('non-interactive') }] });
             expect(existsSync(join(dir, 'pwned.txt'))).toBe(false);
+        });
+    });
+
+    describe('structured verdicts', () => {
+        it('stores verdicts and feeds formatted review issues to the fixer', async () => {
+            dir = setupProject();
+            const { ctx, provider } = await run(dir, [PLAN, CODE, REJECT, FIX, APPROVE, PASS, TESTS, PASS]);
+
+            expect(ctx.state).toBe('qa_approved');
+            expect(ctx.verdicts?.reviewer?.verdict).toBe('approve');
+            expect(ctx.verdicts?.judge?.verdict).toBe('pass');
+            expect(provider.userPrompt(3)).toContain('1. [high] src/app.ts rename app');
+        });
+
+        it('does not treat verdict words in prose as a verdict', async () => {
+            dir = setupProject({ maxIterations: 3 });
+            // "APPROVE" in text is ignored; the tool call says request_changes
+            const prose: MockStep = { content: 'I would APPROVE this, but', toolCalls: REJECT.toolCalls };
+            const { ctx } = await run(dir, [PLAN, CODE, prose, FIX, APPROVE, PASS, TESTS, PASS]);
+            expect(ctx.history.map(h => h.to)).toContain('review_rejected');
+        });
+
+        it('reminds an agent once, then accepts a JSON verdict in text', async () => {
+            dir = setupProject();
+            const { ctx, provider } = await run(dir, [
+                PLAN, CODE,
+                'Looks good to me.',
+                '```json\n{"verdict":"approve","summary":"fine","issues":[]}\n```',
+                PASS, TESTS, PASS,
+            ]);
+            expect(ctx.state).toBe('qa_approved');
+            const reminder = provider.calls[3]!.messages.at(-1);
+            expect(reminder).toMatchObject({ role: 'user', content: expect.stringContaining('submit_verdict') });
+        });
+
+        it('fails the run clearly when no valid verdict arrives', async () => {
+            dir = setupProject();
+            const { ctx } = await run(dir, [PLAN, CODE, 'Looks good.', 'Still looks good.']);
+            expect(ctx.state).toBe('failed');
+        });
+
+        it('returns schema errors to the agent so it can correct the verdict', async () => {
+            dir = setupProject();
+            const bad: MockStep = { content: '', toolCalls: [{ name: 'submit_verdict', input: { verdict: 'maybe', summary: '' } }] };
+            const { ctx, provider } = await run(dir, [PLAN, CODE, bad, APPROVE, PASS, TESTS, PASS]);
+            expect(ctx.state).toBe('qa_approved');
+            expect(provider.calls[3]!.messages.at(-1)).toMatchObject({
+                role: 'tool', results: [{ isError: true, content: expect.stringContaining('Invalid verdict') }],
+            });
         });
     });
 });

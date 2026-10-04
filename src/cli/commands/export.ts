@@ -12,6 +12,7 @@ import { Command } from 'commander';
 import { writeFileSync } from 'node:fs';
 import { configExists } from '../../core/config/manager.js';
 import { listSessions, loadSession } from '../../core/workflow/session.js';
+import { formatVerdict, type Verdict, type VerdictRole } from '../../agents/verdicts.js';
 import { AGENT_ROLE_LABELS } from '../../agents/types.js';
 import type { AgentRole } from '../../agents/types.js';
 import type { TokenUsageEntry } from '../../core/workflow/token-tracker.js';
@@ -66,7 +67,7 @@ export const exportCommand = new Command('export')
 
 // ── Report builders ──
 
-interface SessionLike {
+export interface SessionLike {
     id: string;
     createdAt: number;
     updatedAt: number;
@@ -80,12 +81,13 @@ interface SessionLike {
         reviewFeedback?: string;
         securityFindings?: string;
         testFailures?: string;
+        verdicts?: Partial<Record<VerdictRole, Verdict>>;
         history: Array<{ from: string; to: string; event: string; timestamp: number }>;
     };
     tokenUsage: readonly TokenUsageEntry[];
 }
 
-function buildMarkdownReport(session: SessionLike): string {
+export function buildMarkdownReport(session: SessionLike): string {
     const ctx = session.context;
     const durationMs = session.updatedAt - session.createdAt;
     const duration = formatDuration(durationMs);
@@ -136,6 +138,13 @@ function buildMarkdownReport(session: SessionLike): string {
         lines.push(``);
     }
 
+    if (ctx.verdicts?.judge) {
+        lines.push(`## QA Verdict`);
+        lines.push(``);
+        lines.push(formatVerdict(ctx.verdicts.judge));
+        lines.push(``);
+    }
+
     if (ctx.testFailures) {
         lines.push(`## Test Failures`);
         lines.push(``);
@@ -176,7 +185,7 @@ function buildMarkdownReport(session: SessionLike): string {
     return lines.join('\n');
 }
 
-function buildJsonReport(session: SessionLike): string {
+export function buildJsonReport(session: SessionLike): string {
     const ctx = session.context;
     const totalTokens = session.tokenUsage.reduce((s, e) => s + e.totalTokens, 0);
 
@@ -193,6 +202,7 @@ function buildJsonReport(session: SessionLike): string {
         reviewFeedback: ctx.reviewFeedback ?? null,
         securityFindings: ctx.securityFindings ?? null,
         testFailures: ctx.testFailures ?? null,
+        verdicts: ctx.verdicts ?? null,
         history: ctx.history,
         tokenUsage: {
             total: totalTokens,

@@ -1,8 +1,9 @@
-import { BaseAgent, type AgentInput, type AgentOptions } from '../base.js';
+import type { AgentInput, AgentOptions } from '../base.js';
+import { VerdictAgent } from '../verdict-agent.js';
 import { loadAgentPrompt, loadCodingStandards } from '../../prompts/library.js';
 import type { LLMProvider } from '../../providers/types.js';
 
-export class SecurityAgent extends BaseAgent {
+export class SecurityAgent extends VerdictAgent {
     private readonly projectRoot: string;
 
     constructor(

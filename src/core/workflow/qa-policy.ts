@@ -62,28 +62,6 @@ export function loadQAPolicy(projectRoot: string, overrides?: Partial<QAPolicy>)
 }
 
 /**
- * Evaluate review output against the QA policy.
- *
- * Returns whether the review passes the policy requirements.
- */
-export function evaluateReview(reviewContent: string, policy: QAPolicy): QAEvaluation {
-    const issues = parseReviewIssues(reviewContent);
-    const criticalCount = issues.filter(i => i.severity === 'critical').length;
-    const warningCount = issues.filter(i => i.severity === 'warning').length;
-
-    const passed = criticalCount <= policy.maxCriticalIssues &&
-        warningCount <= policy.maxWarnings;
-
-    return {
-        passed,
-        criticalCount,
-        warningCount,
-        totalIssues: issues.length,
-        issues,
-    };
-}
-
-/**
  * Format the QA policy as context for the judge agent.
  */
 export function formatPolicyForAgent(policy: QAPolicy): string {
@@ -115,51 +93,4 @@ export function formatPolicyForAgent(policy: QAPolicy): string {
     }
 
     return rules.join('\n');
-}
-
-// ── Internal types ──
-
-export interface QAEvaluation {
-    passed: boolean;
-    criticalCount: number;
-    warningCount: number;
-    totalIssues: number;
-    issues: ReviewIssue[];
-}
-
-interface ReviewIssue {
-    severity: 'critical' | 'warning' | 'nit';
-    description: string;
-}
-
-/**
- * Parse a review output to extract issues with severity.
- *
- * Matches only structured issue markers where the severity keyword
- * appears as a label at the start of a line (optionally bulleted/numbered),
- * e.g.:
- * - **CRITICAL**: description
- * - CRITICAL: description
- * - 1. WARNING: description
- * - NIT: description
- *
- * Does NOT match casual mentions like "no critical issues found".
- */
-function parseReviewIssues(content: string): ReviewIssue[] {
-    const issues: ReviewIssue[] = [];
-    const lines = content.split('\n');
-
-    // Matches lines where severity keyword appears as a structured label:
-    // Optional leading bullet/number, optional markdown bold, then KEYWORD followed by colon
-    const issuePattern = /^\s*(?:[-*•]|\d+[.)]\s*)?\s*\*{0,2}(CRITICAL|WARNING|NIT)\*{0,2}\s*:/i;
-
-    for (const line of lines) {
-        const match = line.match(issuePattern);
-        if (match?.[1]) {
-            const severity = match[1].toLowerCase() as 'critical' | 'warning' | 'nit';
-            issues.push({ severity, description: line.trim() });
-        }
-    }
-
-    return issues;
 }

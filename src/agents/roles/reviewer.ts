@@ -5,11 +5,12 @@
  * Used by: workflow runner
  */
 
-import { BaseAgent, type AgentInput, type AgentOptions, type AgentOutput } from '../base.js';
+import type { AgentInput, AgentOptions } from '../base.js';
+import { VerdictAgent } from '../verdict-agent.js';
 import { loadAgentPrompt, loadCodingStandards } from '../../prompts/library.js';
 import type { LLMProvider } from '../../providers/types.js';
 
-export class ReviewerAgent extends BaseAgent {
+export class ReviewerAgent extends VerdictAgent {
     private readonly projectRoot: string;
 
     constructor(
@@ -44,14 +45,5 @@ export class ReviewerAgent extends BaseAgent {
         }
 
         return prompt;
-    }
-
-    /**
-     * Check if the review approves the code.
-     * Looks for "APPROVE" in the output (case-insensitive).
-     */
-    static isApproved(output: AgentOutput): boolean {
-        const content = output.content.toUpperCase();
-        return content.includes('APPROVE') && !content.includes('REQUEST_CHANGES');
     }
 }

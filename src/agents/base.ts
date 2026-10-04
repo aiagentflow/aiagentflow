@@ -155,8 +155,9 @@ export abstract class BaseAgent {
             callbacks?.onComplete?.(content);
 
             // An empty answer usually means a compound model emitted only intermediate
-            // events, or an API returned HTTP 200 with an empty body.
-            if (!content) {
+            // events, or an API returned HTTP 200 with an empty body. Agents that finish
+            // by calling a tool (isDone) legitimately end with no text.
+            if (!content && !this.isDone()) {
                 logger.warn(`${label} streaming returned empty content — retrying without streaming`);
                 return this.execute(input);
             }
@@ -182,6 +183,22 @@ export abstract class BaseAgent {
     }
 
     /**
+     * True once the agent has finished through a tool call (e.g. submit_verdict).
+     * The loop then stops without asking the model for more text.
+     */
+    protected isDone(): boolean {
+        return false;
+    }
+
+    /**
+     * If the agent ended its turn without meeting a completion requirement,
+     * return a message to send back; the model gets one more chance.
+     */
+    protected completionReminder(): string | undefined {
+        return undefined;
+    }
+
+    /**
      * The tool loop shared by execute() and executeStreaming().
      *
      * Calls `turn` until the model stops requesting tools. After `maxTurns`
@@ -204,12 +221,20 @@ export abstract class BaseAgent {
         };
 
         let tokens = 0;
+        let reminded = false;
         for (let i = 0; i < this.maxTurns; i++) {
             const result = await turn(messages, options);
             tokens += result.tokens;
 
             if (result.toolCalls.length === 0 || !this.tools) {
-                return { content: result.content, tokens };
+                const reminder = reminded ? undefined : this.completionReminder();
+                if (!reminder) return { content: result.content, tokens };
+                reminded = true;
+                messages.push(
+                    { role: 'assistant', content: result.content || '(no response)' },
+                    { role: 'user', content: reminder },
+                );
+                continue;
             }
 
             const results: ToolResult[] = [];
@@ -217,6 +242,7 @@ export abstract class BaseAgent {
                 logger.debug(`${this.role} calling tool: ${call.name}`);
                 results.push(await this.tools.execute(call));
             }
+            if (this.isDone()) return { content: result.content, tokens };
             messages.push(
                 { role: 'assistant', content: result.content, toolCalls: result.toolCalls },
                 { role: 'tool', results },

@@ -11,6 +11,7 @@
 import { WorkflowError } from '../errors.js';
 import { logger } from '../../utils/logger.js';
 import type { AgentRole } from '../../agents/types.js';
+import type { Verdict, VerdictRole } from '../../agents/verdicts.js';
 
 // ── Workflow State ──
 
@@ -77,6 +78,8 @@ export interface WorkflowContext {
     testFailures?: string;
     /** Previous test failure outputs (for detecting repeated errors). */
     previousFailures: string[];
+    /** Latest structured verdict from each judging agent. */
+    verdicts?: Partial<Record<VerdictRole, Verdict>>;
     /** History of all state transitions. */
     history: Array<{ from: WorkflowStateValue; to: WorkflowStateValue; event: string; timestamp: number }>;
 }
