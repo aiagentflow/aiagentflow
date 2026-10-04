@@ -14,6 +14,9 @@ import { ProviderError } from '../core/errors.js';
 import { logger } from '../utils/logger.js';
 import { AGENT_ROLE_LABELS } from './types.js';
 
+/** Maximum model turns that may request tools before a final answer is forced. */
+const MAX_TOOL_TURNS = 10;
+
 /** Input that an agent receives to do its work. */
 export interface AgentInput {
     /** The task or instruction for the agent. */
@@ -104,19 +107,19 @@ export abstract class BaseAgent {
             temperature: this.temperature,
             maxTokens: this.maxTokens,
             systemPrompt,
-            ...(this.tools.length > 0 ? { tools: this.tools, onToolCall: this.onToolCall } : {}),
+            ...(this.tools.length > 0 && this.onToolCall ? { tools: this.tools } : {}),
         };
 
         try {
-            const response = await this.provider.chat(messages, options);
+            const { response, totalTokens } = await this.runToolLoop(messages, options);
             const content = this.parseResponse(response);
 
-            logger.success(`${label} complete (${response.usage.totalTokens} tokens)`);
+            logger.success(`${label} complete (${totalTokens} tokens)`);
 
             return {
                 content,
                 role: this.role,
-                tokensUsed: response.usage.totalTokens,
+                tokensUsed: totalTokens,
                 success: true,
             };
         } catch (err) {
@@ -192,6 +195,45 @@ export abstract class BaseAgent {
             logger.debug(`Stream error: ${err instanceof Error ? err.message : String(err)}`);
             return this.execute(input);
         }
+    }
+
+    /**
+     * Call the provider until the model stops requesting tools.
+     *
+     * Each requested tool call is executed via `onToolCall` and its result is
+     * sent back. After MAX_TOOL_TURNS the model gets one final call without
+     * tools so it must answer in text.
+     */
+    private async runToolLoop(
+        initial: ChatMessage[],
+        options: ChatOptions,
+    ): Promise<{ response: ChatResponse; totalTokens: number }> {
+        const messages = [...initial];
+        let totalTokens = 0;
+
+        for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+            const response = await this.provider.chat(messages, options);
+            totalTokens += response.usage.totalTokens;
+
+            if (response.toolCalls.length === 0 || !this.onToolCall) {
+                return { response, totalTokens };
+            }
+
+            const results: ToolResult[] = [];
+            for (const call of response.toolCalls) {
+                logger.debug(`${this.role} calling tool: ${call.name}`);
+                results.push(await this.onToolCall(call));
+            }
+            messages.push(
+                { role: 'assistant', content: response.content, toolCalls: response.toolCalls },
+                { role: 'tool', results },
+            );
+        }
+
+        logger.warn(`${AGENT_ROLE_LABELS[this.role]} hit the tool-call limit (${MAX_TOOL_TURNS}); requesting a final answer`);
+        const response = await this.provider.chat(messages, { ...options, tools: undefined });
+        totalTokens += response.usage.totalTokens;
+        return { response, totalTokens };
     }
 
     /** Build the system prompt that defines this agent's role and behavior. */

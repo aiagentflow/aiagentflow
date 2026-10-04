@@ -34,6 +34,10 @@ export type {
     ChatChunk,
     ModelInfo,
     LLMProviderName,
+    StopReason,
+    ToolCall,
+    ToolDefinition,
+    ToolResult,
 } from '../providers/types.js';
 
 // Re-export agent types

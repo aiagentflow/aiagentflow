@@ -20,6 +20,7 @@ import type {
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
+import { normalizeStopReason, toPlainMessages } from './messages.js';
 
 /** Configuration required to create a Gemini provider. */
 export interface GeminiProviderConfig {
@@ -101,6 +102,8 @@ export class GeminiProvider implements LLMProvider {
             model,
             usage,
             finishReason,
+            stopReason: normalizeStopReason(finishReason),
+            toolCalls: [],
         };
     }
 
@@ -263,7 +266,7 @@ export class GeminiProvider implements LLMProvider {
             systemParts.push(options.systemPrompt);
         }
 
-        for (const msg of messages) {
+        for (const msg of toPlainMessages(messages)) {
             if (msg.role === 'system') {
                 systemParts.push(msg.content);
                 continue;

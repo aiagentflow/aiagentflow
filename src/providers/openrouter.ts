@@ -24,6 +24,7 @@ import type {
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
+import { normalizeStopReason, toPlainMessages } from './messages.js';
 
 /** Configuration required to create an OpenRouter provider. */
 export interface OpenRouterProviderConfig {
@@ -108,6 +109,8 @@ export class OpenRouterProvider implements LLMProvider {
             model: (data.model as string) ?? model,
             usage,
             finishReason: (choice?.finish_reason as string) ?? 'unknown',
+            stopReason: normalizeStopReason(choice?.finish_reason as string | undefined),
+            toolCalls: [],
         };
     }
 
@@ -239,7 +242,7 @@ export class OpenRouterProvider implements LLMProvider {
             apiMessages.push({ role: 'system', content: options.systemPrompt });
         }
 
-        for (const msg of messages) {
+        for (const msg of toPlainMessages(messages)) {
             apiMessages.push({ role: msg.role, content: msg.content });
         }
 

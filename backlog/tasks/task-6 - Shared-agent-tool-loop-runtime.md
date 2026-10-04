@@ -4,6 +4,7 @@ title: Shared agent tool-loop runtime
 status: To Do
 assignee: []
 created_date: '2026-10-04 01:19'
+updated_date: '2026-10-04 01:54'
 labels:
   - runtime
   - agents
@@ -28,3 +29,9 @@ One loop in BaseAgent (or src/agents/runtime.ts) that calls the provider, execut
 - [ ] #3 Streaming path supports tools
 - [ ] #4 MCP and memory tools routed through the same registry
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+task-3 landed a basic non-streaming loop in BaseAgent.runToolLoop (MAX_TOOL_TURNS=10). This task extends it: streaming with tools, per-role maxTurns, budget stop, shared tool registry.
+<!-- SECTION:NOTES:END -->

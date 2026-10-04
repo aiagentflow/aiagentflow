@@ -20,6 +20,7 @@ import type {
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
+import { normalizeStopReason, toPlainMessages } from './messages.js';
 
 /** Configuration required to create an OpenAI provider. */
 export interface OpenAIProviderConfig {
@@ -92,6 +93,8 @@ export class OpenAIProvider implements LLMProvider {
             model: (response.model as string) ?? model,
             usage,
             finishReason: (choice?.finish_reason as string) ?? 'unknown',
+            stopReason: normalizeStopReason(choice?.finish_reason as string | undefined),
+            toolCalls: [],
         };
     }
 
@@ -243,7 +246,7 @@ export class OpenAIProvider implements LLMProvider {
             apiMessages.push({ role: 'system', content: options.systemPrompt });
         }
 
-        for (const msg of messages) {
+        for (const msg of toPlainMessages(messages)) {
             apiMessages.push({ role: msg.role, content: msg.content });
         }
 
