@@ -15,7 +15,7 @@ import { ToolRegistry, type Tool } from '../tools/registry.js';
 import { createBuiltinTools, commandPolicyFromConfig } from '../tools/builtin.js';
 import type { ChangeSet } from '../tools/repo.js';
 import type { ConfirmAnswer } from '../tools/command.js';
-import type { ToolCall, ToolResult } from '../providers/types.js';
+import type { ToolCall, ToolResult, TokenUsage } from '../providers/types.js';
 import { buildTestCommand } from '../utils/package-manager.js';
 import { createProvider } from '../providers/registry.js';
 import { ArchitectAgent } from './roles/architect.js';
@@ -42,6 +42,8 @@ export interface AgentFactoryOptions {
     maxTurns?: number;
     /** Observes every executed tool call and its result. */
     onToolResult?: (call: ToolCall, result: ToolResult) => void;
+    /** Called after every model turn with the usage so far; may throw to stop the agent. */
+    onTurn?: (usageSoFar: TokenUsage) => void;
 }
 
 /**
@@ -92,6 +94,7 @@ export function createAgent(
         tools,
         legacyFileBlocks,
         onToolResult: factoryOpts?.onToolResult,
+        onTurn: factoryOpts?.onTurn,
     };
 
     let agent: BaseAgent;

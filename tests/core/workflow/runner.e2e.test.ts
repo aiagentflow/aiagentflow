@@ -18,7 +18,11 @@ vi.mock('../../../src/providers/registry.js', async (importOriginal) => {
     return { ...actual, createProvider: () => holder.provider };
 });
 
+// Every run here is --auto or --headless: reaching an interactive prompt is a bug
+vi.mock('prompts', () => ({ default: vi.fn(async () => { throw new Error('Interactive prompt reached in a non-interactive run'); }) }));
+
 const { runWorkflow, resumeWorkflow } = await import('../../../src/core/workflow/runner.js');
+const { runTaskQueue } = await import('../../../src/core/workflow/task-queue.js');
 
 // Passes only when src/fixed.ts exists, so tests can drive the fail -> fix -> pass loop.
 const CHECK_SCRIPT = `const fs = require('fs');
@@ -407,6 +411,78 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             // The same events are in the session's event log
             const sessionId = (seen[0] as { sessionId: string }).sessionId;
             expect(readEventLog(getEventLogPath(dir, sessionId), 100).map(e => e.type)).toEqual(types);
+            expect(ctx.status).toBe('passed');
+        });
+    });
+
+    describe('budgets and headless mode', () => {
+        it('stops mid-agent when the token budget runs out and records the spend', async () => {
+            dir = setupProject();
+            // Each mock turn reports 10 prompt tokens plus output; the coder loops on tool calls
+            const looping: MockStep = { content: '', toolCalls: [{ name: 'list_dir', input: {} }] };
+            holder.provider = new MockProvider([PLAN, looping, looping, looping, looping, looping]);
+
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Build', auto: true, streaming: false, isolation: 'inplace', showSummary: false, budget: { maxTokens: 60 } });
+
+            expect(ctx).toMatchObject({ status: 'failed', failureKind: 'budget' });
+            expect(ctx.failureReason).toContain('Token budget exceeded');
+            expect(ctx.history.at(-1)).toMatchObject({ step: 'implement', outcome: 'aborted' });
+            // Partial coder usage is counted, not lost
+            expect(ctx.usage!.totalTokens).toBeGreaterThanOrEqual(60);
+        });
+
+        it('does not start another step once the budget is spent', async () => {
+            dir = setupProject();
+            holder.provider = new MockProvider([PLAN]);
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Build', auto: true, streaming: false, isolation: 'inplace', showSummary: false, budget: { maxTokens: 1 } });
+            expect(ctx).toMatchObject({ status: 'failed', failureKind: 'budget' });
+        });
+
+        it('records each batch task\'s real usage', async () => {
+            dir = setupProject();
+            holder.provider = new MockProvider([PLAN, CODE, APPROVE, PASS, TESTS, PASS, PLAN, CODE, APPROVE, PASS, TESTS, PASS]);
+            const results = await runTaskQueue({ projectRoot: dir, tasks: ['first', 'second'], auto: true, isolation: 'inplace', budget: { maxTokens: 100_000 } });
+            expect(results.map(r => r.status)).toEqual(['completed', 'completed']);
+            expect(results.every(r => (r.tokensUsed ?? 0) > 0)).toBe(true);
+        });
+
+        it('stops a batch when the shared budget runs out', async () => {
+            dir = setupProject();
+            holder.provider = new MockProvider([PLAN, CODE, APPROVE, PASS, TESTS, PASS]);
+            const results = await runTaskQueue({ projectRoot: dir, tasks: ['first', 'second'], auto: true, isolation: 'inplace', budget: { maxTokens: 70 } });
+            expect(results[0]!.result).toMatchObject({ status: 'failed', failureKind: 'budget' });
+            expect(results[1]!.status).toBe('skipped');
+        });
+
+        it('never prompts in headless mode, even with approvals configured', async () => {
+            dir = setupProject();
+            const configPath = join(dir, '.aiagentflow', 'config.json');
+            const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+            config.workflow.humanApproval = true;
+            config.workflow.approvalGates = ['architect'];
+            writeFileSync(configPath, JSON.stringify(config));
+            const provider = new MockProvider([
+                PLAN,
+                { content: '', toolCalls: [{ name: 'run_command', input: { command: 'touch needs-approval.txt' } }] },
+                CODE, APPROVE, PASS, TESTS, PASS,
+            ]);
+            holder.provider = provider;
+
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Build', headless: true, streaming: false, isolation: 'inplace', showSummary: false });
+
+            expect(ctx.status).toBe('passed');
+            expect(existsSync(join(dir, 'needs-approval.txt'))).toBe(false);
+            expect(provider.calls[2]!.messages.at(-1)).toMatchObject({ role: 'tool', results: [{ isError: true }] });
+        });
+
+        it('resumes headless without asking about a missing worktree', async () => {
+            dir = setupProject();
+            const ctx0 = { ...createWorkflowContext('Old', 'standard', 'judge') };
+            saveSession(dir, ctx0, [], 'lost-worktree', { branch: 'aiagentflow/gone', path: join(dir, 'no-such-worktree') });
+            holder.provider = new MockProvider([PASS]);
+
+            const ctx = await resumeWorkflow({ projectRoot: dir, sessionId: 'lost-worktree', headless: true, streaming: false });
+
             expect(ctx.status).toBe('passed');
         });
     });

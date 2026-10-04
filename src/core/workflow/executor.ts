@@ -18,12 +18,14 @@ import { isPositive, type Verdict, type VerdictRole, isVerdictRole } from '../..
 import { ChangeSet } from '../../tools/repo.js';
 import type { McpRegistry } from '../../mcp/registry.js';
 import type { AppConfig } from '../config/types.js';
-import { WorkflowError } from '../errors.js';
+import { BudgetExceededError, ProviderError, WorkflowError } from '../errors.js';
+import type { TokenUsage } from '../../providers/types.js';
+import { budgetExceeded, type BudgetLimits, type BudgetSpend } from './budget-tracker.js';
 import { logger } from '../../utils/logger.js';
 import { buildTestCommand } from '../../utils/package-manager.js';
 import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
 import { confirmCommand } from '../../cli/utils/confirm-command.js';
-import { failRun, mergeFiles, type StepRecord, type WorkflowContext } from './engine.js';
+import { failRun, mergeFiles, type FailureKind, type StepRecord, type WorkflowContext } from './engine.js';
 import { nextStep, stepById, type WorkflowDefinition, type WorkflowStep } from './definition.js';
 import { parseAndWriteFiles } from './file-parser.js';
 import { runTests } from './test-runner.js';
@@ -51,6 +53,10 @@ export interface ExecutorParams {
     mcpRegistry?: McpRegistry;
     /** Receives run events (steps, tools, checks, verdicts). */
     events?: EventBus;
+    /** Token, cost, and time caps for this run. */
+    budget?: BudgetLimits;
+    /** When the run started (for the time budget); defaults to now. */
+    startedAt?: number;
     /** Called after every step (crash recovery). */
     onStep?: (ctx: WorkflowContext) => void;
 }
@@ -63,6 +69,8 @@ interface StepResult {
     failure?: string;
     /** The run must stop. */
     abort?: string;
+    /** Why it must stop (default: error). */
+    abortKind?: FailureKind;
     /** Run the same step again (plan regeneration). */
     rerun?: boolean;
 }
@@ -72,6 +80,7 @@ interface StepResult {
  */
 export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowContext> {
     const { workflow, config, auto } = params;
+    const startedAt = params.startedAt ?? Date.now();
     let ctx = params.ctx;
 
     while (ctx.status === 'running') {
@@ -81,13 +90,25 @@ export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowC
             break;
         }
 
+        const overBudget = params.budget && budgetExceeded(params.budget, spentSoFar(params, startedAt));
+        if (overBudget) {
+            logger.warn(`${overBudget}. Stopping before ${step.id}.`);
+            ctx = failRun(ctx, overBudget, 'budget');
+            break;
+        }
+
         let result: StepResult;
         try {
-            result = await runStep(step, ctx, params);
+            result = await runStep(step, ctx, params, startedAt);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             logger.error(message);
-            result = { ctx, abort: message };
+            if (err instanceof BudgetExceededError) {
+                // Count what the interrupted agent spent before it was stopped
+                const usage = err.context?.usage as TokenUsage | undefined;
+                if (usage) params.tokenTracker.record(step.agent, config.agents[step.agent].model, usage);
+            }
+            result = { ctx, abort: message, abortKind: failureKindOf(err) };
         }
         ctx = result.ctx;
 
@@ -109,7 +130,7 @@ export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowC
         if (config.workflow.humanApproval && !auto && ctx.status === 'running' && result.output) {
             const decision = await requestApproval(ctx, AGENT_ROLE_LABELS[step.agent], result.output.content);
             if (decision === 'abort') {
-                ctx = failRun(ctx, 'User aborted');
+                ctx = failRun(ctx, 'User aborted', 'aborted');
             } else if (decision === 'retry') {
                 logger.info(`Re-running ${step.id}...`);
                 ctx = { ...ctx, step: step.id };
@@ -128,12 +149,12 @@ function route(ctx: WorkflowContext, step: WorkflowStep, workflow: WorkflowDefin
     });
 
     if (result.abort) {
-        return failRun({ ...ctx, history: [...ctx.history, record('aborted', result.abort)] }, result.abort);
+        return failRun({ ...ctx, history: [...ctx.history, record('aborted', result.abort)] }, result.abort, result.abortKind);
     }
 
     if (result.failure && !step.onFail) {
         // No recovery step: the failure is the result (e.g. review-only workflows)
-        return failRun({ ...ctx, history: [...ctx.history, record('failed', result.failure)] }, firstLine(result.failure));
+        return failRun({ ...ctx, history: [...ctx.history, record('failed', result.failure)] }, firstLine(result.failure), 'checks');
     }
 
     if (result.failure) {
@@ -141,7 +162,7 @@ function route(ctx: WorkflowContext, step: WorkflowStep, workflow: WorkflowDefin
         const history = [...ctx.history, record('failed', result.failure)];
         if (iteration >= ctx.maxIterations) {
             logger.warn(`Max iterations (${ctx.maxIterations}) reached.`);
-            return failRun({ ...ctx, iteration, history }, `Max iterations (${ctx.maxIterations}) exceeded`);
+            return failRun({ ...ctx, iteration, history }, `Max iterations (${ctx.maxIterations}) exceeded`, 'checks');
         }
         return { ...ctx, iteration, history, step: step.onFail };
     }
@@ -153,7 +174,7 @@ function route(ctx: WorkflowContext, step: WorkflowStep, workflow: WorkflowDefin
 
 // ── Running one step ──
 
-async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorParams): Promise<StepResult> {
+async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorParams, startedAt: number): Promise<StepResult> {
     const { config, projectRoot, auto, streaming } = p;
     const label = AGENT_ROLE_LABELS[step.agent];
     p.events?.emit({ type: 'step.started', step: step.id, agent: step.agent });
@@ -164,6 +185,10 @@ async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorPara
         tools: p.mcpRegistry?.toolsFor(step.agent),
         changes,
         maxTurns: step.maxTurns,
+        onTurn: p.budget ? (usage) => {
+            const reason = budgetExceeded(p.budget!, spentSoFar(p, startedAt, { model: config.agents[step.agent].model, usage }));
+            if (reason) throw new BudgetExceededError(reason, { usage });
+        } : undefined,
         onToolResult: p.events ? (call, result) => {
             p.events!.emit({ type: 'tool.called', step: step.id, agent: step.agent, tool: call.name, input: call.input });
             p.events!.emit({ type: 'tool.result', step: step.id, agent: step.agent, tool: call.name, isError: result.isError === true });
@@ -208,7 +233,7 @@ async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorPara
     // Review gate: let the user approve, edit, or regenerate this step's output
     if (!auto && (step.approval || isApprovalGated(step.agent, config.workflow.approvalGates))) {
         const review = await requestStepReview(label, output.content);
-        if (review.action === 'abort') return { ctx, abort: `User aborted after reviewing ${step.id}` };
+        if (review.action === 'abort') return { ctx, abort: `User aborted after reviewing ${step.id}`, abortKind: 'aborted' };
         if (review.action === 'regenerate') {
             logger.info(`Regenerating ${step.id} with feedback: "${review.feedback}"`);
             return { ctx: { ...ctx, task: `${ctx.task}\n\n[FEEDBACK]: ${review.feedback}` }, rerun: true };
@@ -301,7 +326,7 @@ async function runChecks(ctx: WorkflowContext, step: WorkflowStep, p: ExecutorPa
             }
             if (isRepeatedFailure(tests.output, ctx.previousFailures)) {
                 logger.warn('Repeated test failure detected — same errors after a fix attempt. Stopping.');
-                return { ctx, abort: 'Repeated test failure — the fixer could not resolve the issue' };
+                return { ctx, abort: 'Repeated test failure — the fixer could not resolve the issue', abortKind: 'checks' };
             }
             const failure = `Test failures:\n${tests.output}`;
             return { ctx: { ...ctx, previousFailures: [...ctx.previousFailures, tests.output], testFailures: tests.output, lastFailure: failure }, failure };
@@ -380,6 +405,21 @@ export function buildAgentContext(
 }
 
 // ── Helpers ──
+
+/** Spend so far: recorded steps plus, optionally, the running agent's usage. */
+function spentSoFar(p: ExecutorParams, startedAt: number, current?: { model: string; usage: TokenUsage }): BudgetSpend {
+    return {
+        tokens: p.tokenTracker.getTotalTokens() + (current?.usage.totalTokens ?? 0),
+        costUsd: p.tokenTracker.estimateCost() + (current ? costOf({ model: current.model, ...current.usage }) : 0),
+        elapsedMs: Date.now() - startedAt,
+    };
+}
+
+function failureKindOf(err: unknown): FailureKind {
+    if (err instanceof BudgetExceededError) return 'budget';
+    if (err instanceof ProviderError) return 'provider';
+    return 'error';
+}
 
 /** The structured verdict a judging agent attached to its output. */
 function requireVerdict(output: AgentOutput, role: VerdictRole): Verdict {
