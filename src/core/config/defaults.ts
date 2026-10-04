@@ -29,7 +29,7 @@ const DEFAULT_AGENT_ROLE = {
  * without any API keys. Anthropic is opt-in via the init wizard.
  */
 export const DEFAULT_CONFIG: AppConfig = {
-    version: 1,
+    version: 2,
 
     providers: {
         ollama: {
@@ -57,7 +57,6 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
 
     workflow: {
-        mode: 'balanced' as const,
         maxIterations: 5,
         humanApproval: true,
         approvalGates: [] as ('architect' | 'coder' | 'reviewer' | 'security' | 'tester' | 'fixer' | 'judge')[],

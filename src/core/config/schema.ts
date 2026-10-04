@@ -9,6 +9,9 @@
  */
 
 import { z } from 'zod';
+
+/** Current config format version. */
+export const CONFIG_VERSION = 2;
 import { BUILTIN_TOOL_NAMES, DEFAULT_DENY } from '../../tools/permissions.js';
 
 /**
@@ -125,8 +128,8 @@ export const projectConfigSchema = z.object({
  * Schema for workflow execution settings.
  */
 export const workflowConfigSchema = z.object({
-    /** Workflow mode preset: fast, balanced, or strict. */
-    mode: z.enum(['fast', 'balanced', 'strict']).default('balanced'),
+    /** Deprecated (v1): set by the --mode flag at runtime; not needed in config files. */
+    mode: z.enum(['fast', 'balanced', 'strict']).optional(),
     /** Maximum number of fix iterations before stopping. */
     maxIterations: z.number().int().min(1).max(20).default(5),
     /** Whether to require human approval between stages. */
@@ -195,8 +198,8 @@ export const mcpServerConfigSchema = z.object({
  * This is the single source of truth for config structure.
  */
 export const appConfigSchema = z.object({
-    /** Schema version for future migrations. */
-    version: z.literal(1).default(1),
+    /** Config format version. v1 files must be upgraded with `aiagentflow migrate`. */
+    version: z.literal(CONFIG_VERSION),
     /** LLM provider connection settings. */
     providers: providerConfigSchema,
     /** Per-agent model and parameter assignments. */

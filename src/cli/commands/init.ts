@@ -450,7 +450,6 @@ async function runWizard(projectRoot: string): Promise<AppConfig | null> {
 
     const selectedMode = (mode ?? 'balanced') as WorkflowMode;
     const preset = WORKFLOW_PRESETS[selectedMode];
-    config.workflow.mode = selectedMode;
     config.workflow.maxIterations = preset.maxIterations;
     config.workflow.humanApproval = preset.humanApproval;
     config.workflow.autoCommit = preset.autoCommit;

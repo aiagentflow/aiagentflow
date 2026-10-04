@@ -508,7 +508,7 @@ function printDryRun(
     logger.header('AI Workflow — Dry Run');
     console.log(chalk.gray(`Task: ${task}`));
     console.log(chalk.gray(`Workflow: ${workflow.name}${workflow.description ? `: ${workflow.description}` : ''}`));
-    console.log(chalk.gray(`Mode: ${config.workflow.mode}`));
+    if (config.workflow.mode) console.log(chalk.gray(`Mode: ${config.workflow.mode} (deprecated)`));
     console.log(chalk.gray(`Max iterations: ${maxIterations}`));
     console.log();
 

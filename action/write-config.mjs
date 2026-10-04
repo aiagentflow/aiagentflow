@@ -27,7 +27,7 @@ const model = process.env.MODEL || DEFAULT_MODELS[provider];
 const roles = ['architect', 'coder', 'reviewer', 'security', 'tester', 'fixer', 'judge'];
 
 const config = {
-    version: 1,
+    version: 2,
     providers: { [provider]: {} },
     agents: Object.fromEntries(roles.map(role => [role, { provider, model }])),
     project: {},

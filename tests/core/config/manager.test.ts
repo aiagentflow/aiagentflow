@@ -59,7 +59,7 @@ describe('saveConfig', () => {
     });
 
     it('throws ConfigError for invalid config', () => {
-        const invalidConfig = { ...DEFAULT_CONFIG, version: 99 as 1 };
+        const invalidConfig = { ...DEFAULT_CONFIG, version: 99 as 2 };
         expect(() => saveConfig(testDir, invalidConfig)).toThrow(ConfigError);
     });
 });
@@ -69,7 +69,7 @@ describe('loadConfig', () => {
         saveConfig(testDir, DEFAULT_CONFIG);
         const loaded = loadConfig(testDir);
 
-        expect(loaded.version).toBe(1);
+        expect(loaded.version).toBe(2);
         expect(loaded.providers.ollama?.baseUrl).toBe('http://localhost:11434');
         expect(loaded.agents.architect.provider).toBe('ollama');
     });
@@ -125,7 +125,7 @@ describe('mergeConfig', () => {
 describe('getDefaultConfig', () => {
     it('returns default config without overrides', () => {
         const config = getDefaultConfig();
-        expect(config.version).toBe(1);
+        expect(config.version).toBe(2);
         expect(config.agents.architect.provider).toBe('ollama');
     });
 

@@ -464,6 +464,11 @@ function warnLegacyPromptOnce(filePath: string): void {
     );
 }
 
+/** The built-in default prompt for a role (ignores project files). */
+export function defaultPrompt(role: AgentRole): string {
+    return DEFAULT_PROMPTS[role];
+}
+
 /**
  * Load the coding standards policy.
  * Returns empty string if no policy file exists.

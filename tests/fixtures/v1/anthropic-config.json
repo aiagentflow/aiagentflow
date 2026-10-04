@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "providers": {
+    "anthropic": { "apiKey": "sk-ant-test", "baseUrl": "https://api.anthropic.com", "apiVersion": "2023-06-01" },
+    "openai": { "apiKey": "sk-test", "baseUrl": "https://api.openai.com" }
+  },
+  "agents": {
+    "architect": { "provider": "anthropic", "model": "claude-sonnet-4-20250514", "temperature": 0.4, "maxTokens": 4096 },
+    "coder": { "provider": "openai", "model": "gpt-4o-mini", "temperature": 0.2, "maxTokens": 8192 },
+    "reviewer": { "provider": "anthropic", "model": "claude-sonnet-4-20250514", "temperature": 0.3, "maxTokens": 4096 },
+    "security": { "provider": "anthropic", "model": "claude-sonnet-4-20250514", "temperature": 0.1, "maxTokens": 4096 },
+    "tester": { "provider": "openai", "model": "gpt-4o-mini", "temperature": 0.2, "maxTokens": 4096 },
+    "fixer": { "provider": "openai", "model": "gpt-4o-mini", "temperature": 0.2, "maxTokens": 8192 },
+    "judge": { "provider": "anthropic", "model": "claude-sonnet-4-20250514", "temperature": 0.1, "maxTokens": 4096 }
+  },
+  "project": {
+    "language": "python",
+    "framework": "fastapi",
+    "testFramework": "pytest",
+    "sourceGlobs": ["app/**/*.py"],
+    "testGlobs": ["tests/**/*.py"]
+  },
+  "workflow": {
+    "mode": "strict",
+    "maxIterations": 10,
+    "humanApproval": true,
+    "approvalGates": ["architect"],
+    "autoCreateBranch": true,
+    "branchPrefix": "ai/",
+    "isolation": "worktree",
+    "autoMerge": "on-judge-pass",
+    "autoRunTests": true,
+    "testCommand": "pytest -q",
+    "lintCommand": "ruff check .",
+    "autoCommit": false,
+    "autoCommitMessage": "ai: {task}"
+  },
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_TOKEN": "ghp_x" } }
+  }
+}

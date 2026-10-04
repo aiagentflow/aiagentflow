@@ -65,6 +65,13 @@ export function applyEnvApiKeys(raw: unknown, env: NodeJS.ProcessEnv): unknown {
     return { ...config, providers };
 }
 
+/** True for configs written by aiagentflow v1.x (version 1, or no version). */
+export function isV1Config(raw: unknown): boolean {
+    if (!raw || typeof raw !== 'object') return false;
+    const version = (raw as { version?: unknown }).version;
+    return version === undefined || version === 1;
+}
+
 /**
  * Load and validate the configuration from disk.
  * Provider API keys may come from environment variables (see API_KEY_ENV_VARS).
@@ -85,7 +92,15 @@ export function loadConfig(projectRoot: string): AppConfig {
 
     logger.debug(`Loading config from ${configPath}`);
 
-    const raw = applyEnvApiKeys(readJsonFile<unknown>(configPath), process.env);
+    const fileContents = readJsonFile<unknown>(configPath);
+    if (isV1Config(fileContents)) {
+        throw new ConfigError(
+            `${configPath} uses the v1 config format. Run "aiagentflow migrate" to upgrade it (your files are backed up first).`,
+            { configPath, version: 1 },
+        );
+    }
+
+    const raw = applyEnvApiKeys(fileContents, process.env);
     const result = appConfigSchema.safeParse(raw);
 
     if (!result.success) {
