@@ -3,8 +3,9 @@
  *
  * A workflow is an ordered list of steps. Each step runs one agent, then
  * optionally runs checks (format, lint, test) and a verdict gate. When a
- * check or gate fails, the workflow jumps to the step's `onFail` target;
- * otherwise it continues to `next` (default: the following step).
+ * check or gate fails, the workflow jumps to the step's `onFail` target, or
+ * fails the run if the step has none; otherwise it continues to `next`
+ * (default: the following step).
  * Steps marked `trigger: on-fail` are skipped in normal order and only run
  * when another step routes to them (e.g. the fixer).
  *
@@ -39,7 +40,7 @@ export const workflowStepSchema = z.object({
     checks: z.array(z.enum(STEP_CHECKS)).default([]),
     /** `verdict`: a negative verdict from a judging agent routes to onFail. */
     gate: z.enum(['verdict']).optional(),
-    /** Step to run when a check or gate fails. Counts as one fix iteration. */
+    /** Step to run when a check or gate fails (one fix iteration). Without it, a failure ends the run as failed. */
     onFail: stepIdSchema.optional(),
     /** Step to run after this one succeeds (default: the next `always` step). */
     next: stepIdSchema.optional(),
@@ -70,10 +71,6 @@ export const workflowDefinitionSchema = z.object({
             if (target && !ids.has(target)) {
                 ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, key], message: `unknown step "${target}"` });
             }
-        }
-        const canFail = step.gate !== undefined || step.checks.some(c => c !== 'format');
-        if (canFail && !step.onFail) {
-            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'onFail'], message: 'required when the step has a gate or a lint/test check' });
         }
         if (step.gate === 'verdict' && !['reviewer', 'security', 'judge'].includes(step.agent)) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'gate'], message: `agent "${step.agent}" does not return a verdict` });

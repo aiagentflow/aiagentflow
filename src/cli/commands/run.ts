@@ -18,9 +18,10 @@ import { logger } from '../../utils/logger.js';
 export const runCommand = new Command('run')
     .description('Run an AI workflow task')
     .argument('<task>', 'Task description or path to a task list file (.txt)')
+    .option('-w, --workflow <name>', 'Workflow to run: standard (default), fast, review, security-audit, or a project workflow')
     .option('--auto', 'Autonomous mode — skip all human approval gates')
     .option('--batch', 'Treat the argument as a task list file (one task per line)')
-    .option('--mode <mode>', 'Workflow mode override: fast, balanced, or strict')
+    .option('--mode <mode>', 'Deprecated: fast, balanced, or strict preset (use --workflow and config instead)')
     .option('--stop-on-failure', 'Stop the queue on first failure (batch mode)')
     .option('--context <paths...>', 'Context files to load as reference documents')
     .option('--no-stream', 'Disable real-time streaming of agent output')
@@ -35,12 +36,16 @@ export const runCommand = new Command('run')
     .option('--no-summary', 'Suppress the token/cost summary at the end of the run')
     .option('--pr <number>', 'Fetch a GitHub PR and address its review comments', parseInt)
     .option('--issue <number>', 'Fetch a GitHub issue and implement it', parseInt)
-    .action(async (task: string, options: { auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean; dryRun?: boolean; isolate?: boolean; reviewPlan?: boolean; approvalGates?: string[]; parallel?: number; maxTokens?: number; maxCost?: number; summary: boolean; pr?: number; issue?: number }) => {
+    .action(async (task: string, options: { workflow?: string; auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean; dryRun?: boolean; isolate?: boolean; reviewPlan?: boolean; approvalGates?: string[]; parallel?: number; maxTokens?: number; maxCost?: number; summary: boolean; pr?: number; issue?: number }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
             logger.error('No configuration found. Run "aiagentflow init" first.');
             process.exit(1);
+        }
+
+        if (options.mode) {
+            logger.warn('--mode is deprecated and will be removed in v3. Use --workflow to pick the pipeline and set iterations/approval in config.');
         }
 
         try {
@@ -71,6 +76,7 @@ export const runCommand = new Command('run')
                 const results = await runTaskQueue({
                     projectRoot,
                     tasks,
+                    workflow: options.workflow,
                     auto: options.auto,
                     mode: options.mode,
                     stopOnFailure: options.stopOnFailure,
@@ -127,6 +133,7 @@ export const runCommand = new Command('run')
             const result = await runWorkflow({
                 projectRoot,
                 task: resolvedTask,
+                workflow: options.workflow,
                 auto: options.auto,
                 mode: options.mode,
                 contextPaths: options.context,

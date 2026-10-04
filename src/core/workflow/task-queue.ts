@@ -37,6 +37,8 @@ export interface QueueOptions {
     projectRoot: string;
     /** List of task descriptions. */
     tasks: string[];
+    /** Workflow to run for every task (default: "standard"). */
+    workflow?: string;
     /** Skip human approval between tasks. */
     auto?: boolean;
     /** Workflow mode override (fast, balanced, strict). */
@@ -64,6 +66,7 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
     const {
         projectRoot,
         tasks,
+        workflow,
         auto = false,
         mode,
         stopOnFailure = false,
@@ -98,9 +101,9 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
     console.log();
 
     if (isParallel) {
-        await runParallel(queue, { projectRoot, auto, mode, contextPaths, dryRun, isolation, parallel, budgetTracker });
+        await runParallel(queue, { projectRoot, workflow, auto, mode, contextPaths, dryRun, isolation, parallel, budgetTracker });
     } else {
-        await runSequential(queue, { projectRoot, auto, mode, stopOnFailure, contextPaths, dryRun, isolation, budgetTracker });
+        await runSequential(queue, { projectRoot, workflow, auto, mode, stopOnFailure, contextPaths, dryRun, isolation, budgetTracker });
     }
 
     printQueueSummary(queue, budgetTracker);
@@ -111,6 +114,7 @@ export async function runTaskQueue(options: QueueOptions): Promise<QueuedTask[]>
 
 interface RunnerParams {
     projectRoot: string;
+    workflow?: string;
     auto: boolean;
     mode?: string;
     stopOnFailure?: boolean;
@@ -122,7 +126,7 @@ interface RunnerParams {
 }
 
 async function runSequential(queue: QueuedTask[], params: RunnerParams): Promise<void> {
-    const { projectRoot, auto, mode, stopOnFailure, contextPaths, dryRun, isolation, budgetTracker } = params;
+    const { projectRoot, workflow, auto, mode, stopOnFailure, contextPaths, dryRun, isolation, budgetTracker } = params;
 
     for (let i = 0; i < queue.length; i++) {
         const item = queue[i]!;
@@ -137,7 +141,7 @@ async function runSequential(queue: QueuedTask[], params: RunnerParams): Promise
         console.log(chalk.gray(item.task));
         console.log();
 
-        await executeTask(item, { projectRoot, auto, mode, contextPaths, dryRun, isolation, budgetTracker });
+        await executeTask(item, { projectRoot, workflow, auto, mode, contextPaths, dryRun, isolation, budgetTracker });
 
         if (item.status === 'failed' && stopOnFailure) {
             markRemaining(queue, i + 1, 'skipped');
@@ -149,7 +153,7 @@ async function runSequential(queue: QueuedTask[], params: RunnerParams): Promise
 // ── Parallel runner ──
 
 async function runParallel(queue: QueuedTask[], params: RunnerParams): Promise<void> {
-    const { projectRoot, auto, mode, contextPaths, dryRun, isolation, parallel = 2, budgetTracker } = params;
+    const { projectRoot, workflow, auto, mode, contextPaths, dryRun, isolation, parallel = 2, budgetTracker } = params;
     const limit = pLimit(parallel);
     let budgetExceeded = false;
 
@@ -163,7 +167,7 @@ async function runParallel(queue: QueuedTask[], params: RunnerParams): Promise<v
             console.log(chalk.bold(`\n── Task ${i + 1}/${queue.length} (parallel) ──`));
             console.log(chalk.gray(item.task));
 
-            await executeTask(item, { projectRoot, auto, mode, contextPaths, dryRun, isolation, budgetTracker });
+            await executeTask(item, { projectRoot, workflow, auto, mode, contextPaths, dryRun, isolation, budgetTracker });
 
             if (budgetTracker.exceeded) {
                 budgetExceeded = true;
@@ -177,7 +181,7 @@ async function runParallel(queue: QueuedTask[], params: RunnerParams): Promise<v
 // ── Task executor ──
 
 async function executeTask(item: QueuedTask, params: Omit<RunnerParams, 'stopOnFailure' | 'parallel'>): Promise<void> {
-    const { projectRoot, auto, mode, contextPaths, dryRun, isolation } = params;
+    const { projectRoot, workflow, auto, mode, contextPaths, dryRun, isolation } = params;
     item.status = 'running';
     const startTime = Date.now();
 
@@ -185,6 +189,7 @@ async function executeTask(item: QueuedTask, params: Omit<RunnerParams, 'stopOnF
         const result = await runWorkflow({
             projectRoot,
             task: item.task,
+            workflow,
             auto,
             mode,
             contextPaths,

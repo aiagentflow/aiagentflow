@@ -118,6 +118,11 @@ function route(ctx: WorkflowContext, step: WorkflowStep, workflow: WorkflowDefin
         return failRun({ ...ctx, history: [...ctx.history, record('aborted', result.abort)] }, result.abort);
     }
 
+    if (result.failure && !step.onFail) {
+        // No recovery step: the failure is the result (e.g. review-only workflows)
+        return failRun({ ...ctx, history: [...ctx.history, record('failed', result.failure)] }, firstLine(result.failure));
+    }
+
     if (result.failure) {
         const iteration = ctx.iteration + 1;
         const history = [...ctx.history, record('failed', result.failure)];
