@@ -1,22 +1,30 @@
 # aiagentflow
 
-A local-first CLI that orchestrates multi-agent AI workflows for software development. Give it a task — or feed it your specs, PRDs, and guidelines — and it coordinates specialized agents to architect, code, review, test, and ship automatically.
+A local-first CLI that runs a team of AI agents on your codebase: an architect plans, a coder implements, a reviewer and a security agent check the change, a tester writes and runs tests, a fixer handles what fails, and a judge decides whether the task is done. Every gate is a structured verdict or a real test run, so a change only passes when it actually passes.
 
-**No cloud dependency. Bring your own API keys. Your code stays on your machine.**
+**Bring your own models and keys. Your code stays on your machine.**
 
 [![npm version](https://img.shields.io/npm/v/@aiagentflow/cli)](https://www.npmjs.com/package/@aiagentflow/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22-green)](https://nodejs.org)
+
+> Upgrading from v1? See [MIGRATION.md](MIGRATION.md).
 
 ---
 
-## How It Works
+## How it works
 
 ```
-Task → Architect → Coder → Reviewer → Security → Tester → Fixer → Judge → Ship
+plan → implement → review → security → test → judge
+            ↑          │         │        │      │
+            └──────────┴── fix ──┴────────┴──────┘
 ```
 
-Each stage uses a specialized AI agent with tuned prompts and parameters. The loop repeats until quality thresholds pass — like a small AI engineering team running on your machine. Agents accumulate project knowledge in `.aiagentflow/memory/` so every run starts smarter than the last.
+- **Agents work through tools.** They explore with `list_dir`, `grep`, and `read_file`, change code with `edit_file` and `write_file`, and verify with `run_command`, within a permission policy you control.
+- **Gates are real.** Reviewer, security, and judge submit structured verdicts with typed issues; lint and tests run for real. Any failure routes to the fixer with the exact problem.
+- **Pipelines are YAML.** Use a built-in workflow or write your own, including steps from plugins.
+- **Runs are isolated.** Each task runs on its own branch in a git worktree, so your working directory is untouched until you merge.
+- **Agents remember.** Conventions, decisions, and gotchas are saved to `.aiagentflow/memory/` so later runs start smarter.
 
 ---
 
@@ -26,336 +34,191 @@ Each stage uses a specialized AI agent with tuned prompts and parameters. The lo
 npm install -g @aiagentflow/cli
 ```
 
----
+Requires Node.js 22 or later.
 
-## Quick Start
-
-```bash
-# 1. Initialize in your project
-cd /path/to/your/project
-aiagentflow init
-
-# 2. Run a task
-aiagentflow run "Add a login form with email/password validation"
-
-# 3. Autonomous mode (no approval prompts)
-aiagentflow run "Refactor the auth module" --auto
-
-# 4. Isolated branch — agents work in a git worktree, your directory stays clean
-aiagentflow run "Refactor the payment module" --isolate
-
-# 5. Review the Architect's plan before any code is written
-aiagentflow run "Add OAuth2 support" --review-plan
-
-# 6. Generate a task list from specs, then batch-run in parallel
-aiagentflow plan docs/prd.md -o tasks.txt
-aiagentflow run --batch tasks.txt --parallel 4 --auto
-```
-
-The `init` wizard walks you through:
-1. Auto-detect your project (language, framework, test framework, package manager)
-2. Select LLM providers (Anthropic, OpenAI, Groq, Gemini, OpenRouter, Ollama)
-3. Enter API keys
-4. Assign models per agent role
-5. Choose a workflow mode (fast, balanced, strict)
-6. Import existing docs (specs, requirements, guidelines) for auto-loading
-
-Configuration is saved locally in `.aiagentflow/config.json`.
-
----
-
-## Features
-
-- **Multi-agent pipeline** — 7 specialized agents, each with a distinct role
-- **Agent memory** — agents persist learned conventions, decisions, and gotchas across runs; each run starts smarter
-- **Context-aware** — feed specs, PRDs, architecture docs, and guidelines to every agent
-- **Worktree isolation** — `--isolate` runs tasks in a clean git worktree, leaving your working directory untouched
-- **Plan review gate** — `--review-plan` pauses after Architect so you can approve, edit, or regenerate the plan
-- **GitHub integration** — `--pr` resolves PR review comments; `--issue` implements issues and opens a PR automatically
-- **MCP tool integration** — agents call real tools (files, databases, Slack, GitHub) via MCP servers
-- **Plugin system** — extend with custom agents and providers via npm packages or local paths
-- **TUI dashboard** — `aiagentflow ui` shows live run status, token counts, and per-agent costs
-- **Local-first** — runs entirely on your machine, no code leaves your system
-- **Provider-agnostic** — Anthropic, OpenAI, Groq, Gemini, OpenRouter (100+ models), Ollama (local/free)
-- **Parallel batch** — `--batch` + `--parallel` fan out tasks across multiple simultaneous workflows
-- **Plan from docs** — generate batch-ready task lists from your existing documentation
-- **Workflow modes** — fast, balanced, or strict presets for iterations, approval, and temperatures
-- **Git-native** — auto-creates branches, auto-commits on QA pass
-- **Human-in-the-loop** — approve or override at any stage, or go full auto
-- **Session persistence** — crash recovery with automatic session saving
-- **Token + cost tracking** — per-agent USD cost breakdown in the run summary
-
----
-
-## CLI Commands
-
-### Core workflow
-
-| Command | Description |
-|---------|-------------|
-| `aiagentflow init` | Interactive setup wizard |
-| `aiagentflow run <task>` | Run a workflow |
-| `aiagentflow run <task> --auto` | Autonomous mode (no approval prompts) |
-| `aiagentflow run <task> --isolate` | Run in an isolated git worktree |
-| `aiagentflow run <task> --review-plan` | Pause after planning for human review |
-| `aiagentflow run <task> --dry-run` | Preview the plan without executing |
-| `aiagentflow run <task> --context <files...>` | Run with extra reference documents |
-| `aiagentflow run --batch tasks.txt [--parallel N]` | Process multiple tasks from a file |
-| `aiagentflow run --pr <number> --isolate` | Resolve a PR's review comments |
-| `aiagentflow run --issue <number> --isolate --auto` | Implement a GitHub issue end-to-end |
-| `aiagentflow resume` | Resume the last interrupted session |
-| `aiagentflow sessions` | List all saved sessions |
-
-### Inspection & management
-
-| Command | Description |
-|---------|-------------|
-| `aiagentflow config` | View current configuration |
-| `aiagentflow doctor` | Health check — verify providers and setup |
-| `aiagentflow runs` | List active worktree runs with status and cost |
-| `aiagentflow discard --merge <branch>` | Merge and clean up a worktree run |
-| `aiagentflow gc` | Prune stale worktree runs and old memories |
-| `aiagentflow plan <docs...>` | Generate a task list from documentation |
-| `aiagentflow chat <agent>` | Talk to a single agent without a full pipeline |
-| `aiagentflow export` | Export a past session as a structured report |
-
-### Memory
-
-| Command | Description |
-|---------|-------------|
-| `aiagentflow memory list [--type <type>]` | List stored memories grouped by type |
-| `aiagentflow memory show <name>` | Print a memory's full body |
-| `aiagentflow memory rm <name>` | Delete a memory |
-| `aiagentflow memory edit <name>` | Open a memory in `$EDITOR` |
-| `aiagentflow memory clear --type <type>` | Bulk-delete all memories of a type |
-
-### MCP & plugins
-
-| Command | Description |
-|---------|-------------|
-| `aiagentflow mcp list` | Show configured MCP servers and their tools |
-| `aiagentflow mcp test <server>` | Start a server and verify it exposes its tools |
-| `aiagentflow plugin list` | Show installed plugins |
-| `aiagentflow plugin install <source>` | Install from npm or symlink a local path |
-| `aiagentflow plugin remove <name>` | Uninstall a plugin |
-| `aiagentflow ui` | Launch the live terminal UI dashboard |
-
----
-
-## Agent Roles
-
-| Agent | Role | What it does |
-|-------|------|-------------|
-| 🧠 Architect | Plan | Analyzes the task, creates an implementation plan, records architecture decisions to memory |
-| 💻 Coder | Implement | Writes production-ready code based on the plan |
-| 🔍 Reviewer | Review | Reviews code for bugs and style issues, writes conventions to memory |
-| 🔒 Security | Security | OWASP top-10 scan, secret detection, injection analysis |
-| 🧪 Tester | Test | Generates tests and runs them, writes gotchas to memory |
-| 🐛 Fixer | Fix | Resolves review, security, and test failures; writes gotchas to memory |
-| ✅ Judge | QA | Final quality gate — pass or fail; records decisions to memory |
-
-Agents read back their relevant memory types on every run. Architect sees architecture, decisions, conventions, and references. Fixer sees gotchas, conventions, and architecture. Judge sees decisions, conventions, and architecture.
-
----
-
-## Agent Memory
-
-Agents accumulate project knowledge in `.aiagentflow/memory/` across runs. Five typed categories:
-
-| Type | Written by | Example |
-|------|-----------|---------|
-| `architecture` | Architect | "Workflow runner is a state machine in `runner.ts`" |
-| `convention` | Reviewer, Architect | "No `any` casts — use generics or `unknown`" |
-| `decision` | Architect, Judge | "Chose Zod over manual types — schemas inferred to types" |
-| `gotcha` | Fixer, Tester, Reviewer | "Streaming must be disabled in batch mode" |
-| `reference` | Architect, Coder | "MCP tool catalog lives in `src/mcp/registry.ts`" |
-
-Memories are stored as human-readable markdown with frontmatter. You can edit, delete, or add entries manually. LRU eviction caps each type at 50 entries; `aiagentflow gc` removes entries not updated in 30 days.
-
----
-
-## Supported Providers
-
-| Provider | Type | Default Model | Notes |
-|----------|------|---------------|-------|
-| **Anthropic** | Cloud | `claude-sonnet-4-20250514` | Recommended for architecture |
-| **OpenAI** | Cloud | `gpt-4o-mini` | Fast for coding and fixing |
-| **Groq** | Cloud | `llama-3.3-70b-versatile` | Generous free tier, sub-second inference |
-| **Google Gemini** | Cloud | `gemini-2.0-flash` | 2M context window |
-| **OpenRouter** | Cloud | `meta-llama/llama-3.1-8b-instruct:free` | 100+ models; append `:free` for zero-cost models |
-| **Ollama** | Local | `llama3.2:latest` | Total privacy, zero cost, no API key |
-
-Mix providers — use a powerful model for Architect, cheaper/faster ones for Coder and Fixer.
-
----
-
-## MCP Tool Integration
-
-Agents can call real tools via [Model Context Protocol](https://github.com/modelcontextprotocol/servers) servers. Add a `mcpServers` block to `.aiagentflow/config.json`:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-      "allowedRoles": ["coder", "tester"]
-    },
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_TOKEN": "ghp_..." }
-    }
-  }
-}
-```
-
-Use `aiagentflow mcp list` to see configured servers and `aiagentflow mcp test <name>` to verify they start correctly.
-
----
-
-## Plugin System
-
-Extend the pipeline with custom agents and providers:
+## Quick start
 
 ```bash
-# Install from npm
-aiagentflow plugin install @my-org/aiagentflow-linter
+cd your-project
+aiagentflow init                                   # pick providers, models, and settings
 
-# Symlink a local plugin (for development)
-aiagentflow plugin install ./plugins/my-custom-agent
+aiagentflow run "Add input validation to the signup form"
+aiagentflow run "Fix the flaky date test" --workflow fast --auto
+aiagentflow run "Add OAuth2 login" --review-plan   # approve the plan before coding starts
 
-# List installed plugins
-aiagentflow plugin list
+aiagentflow review --staged                        # review your staged changes
+aiagentflow review --pr 42 --comment               # review a PR and post inline comments
 ```
-
-Each plugin exports a `manifest` declaring its name, version, and contributions (`agent`, `provider`, or `both`). Plugin agents appear in the workflow after their designated built-in anchor (e.g. `after: "tester"`).
 
 ---
 
-## GitHub Integration
+## Workflows
 
-```bash
-# Resolve all review comments on PR #42 in an isolated branch
-aiagentflow run --pr 42 --isolate
+| Workflow | Steps | Use it for |
+|---|---|---|
+| `standard` (default) | plan → implement → review → security → test → judge, with fixes | Most tasks |
+| `fast` | implement → test, with fixes | Small, well-specified changes |
+| `review` | review → security, read-only | Checking a change |
+| `security-audit` | audit, read-only | A security pass over the repository |
 
-# Implement GitHub issue #7 and open a PR automatically
-aiagentflow run --issue 7 --isolate --auto
+Write your own in `.aiagentflow/workflows/<name>.yml`:
+
+```yaml
+name: careful
+steps:
+  - id: plan
+    agent: architect
+    approval: true
+  - id: implement
+    agent: coder
+    checks: [format, lint]
+    onFail: fix
+  - id: test
+    agent: tester
+    checks: [test]
+    onFail: fix
+  - id: fix
+    agent: fixer
+    trigger: on-fail
+    next: test
 ```
 
-Requires the [GitHub CLI](https://cli.github.com) — run `gh auth login` first.
+Full reference: [docs/workflows.md](docs/workflows.md).
+
+---
+
+## Reviewing changes
+
+`aiagentflow review` runs the reviewer and security agents on a diff without editing anything:
+
+```bash
+aiagentflow review                        # uncommitted changes
+aiagentflow review --diff main...HEAD     # a git range
+aiagentflow review --pr 42 --comment      # post findings as inline PR comments
+aiagentflow review --fail-on critical     # exit 1 only on critical findings
+```
+
+See [docs/review.md](docs/review.md).
+
+## CI and automation
+
+```bash
+aiagentflow run "Implement issue #12" --headless --max-cost 2 --max-time 20 --output json
+```
+
+- `--headless` never prompts; commands that need approval are denied.
+- Exit codes: `0` passed, `1` workflow failed, `2` config or usage error, `3` budget exceeded, `4` provider error.
+- `--output json` prints [run events](docs/events.md) as NDJSON on stdout.
+- Budgets: `--max-tokens`, `--max-cost` (USD), `--max-time` (minutes).
+
+The [GitHub Action](action/README.md) reviews pull requests or runs workflows in CI:
+
+```yaml
+- uses: aiagentflow/aiagentflow/action@v2
+  with:
+    fail-on: high
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+More: [docs/headless.md](docs/headless.md).
+
+---
+
+## Commands
+
+| Command | |
+|---|---|
+| `init` | Interactive setup |
+| `run <task>` | Run a workflow (`--workflow`, `--auto`, `--headless`, `--isolate`/`--inplace`, `--review-plan`, `--dry-run`, `--batch`, `--parallel`, `--pr`, `--issue`, budgets, `--output json`) |
+| `review` | Review a diff or PR |
+| `resume [session]` | Resume an interrupted run |
+| `sessions` | List saved runs |
+| `runs` | List worktree runs with status and cost |
+| `discard --merge <branch>` | Merge and clean up a worktree run |
+| `export` | Export a run as markdown or JSON |
+| `workflow list\|show\|validate` | Manage workflows |
+| `plan <docs...>` | Turn specs into a task list for `--batch` |
+| `chat <agent>` | Talk to one agent |
+| `eval` | Measure a workflow on tasks with hidden tests |
+| `memory list\|show\|edit\|rm\|clear` | Manage agent memory |
+| `mcp list\|test` | MCP servers |
+| `plugin list\|install\|remove` | Plugins |
+| `ui` | Live terminal dashboard |
+| `doctor` | Check setup, providers, and models |
+| `config` | Show the config (secrets masked) |
+| `migrate` | Upgrade a v1 project |
+| `gc` | Clean up stale worktrees and old memories |
+
+---
+
+## Providers
+
+| Provider | Default model | Notes |
+|---|---|---|
+| Anthropic | `claude-opus-5-5` | |
+| OpenAI | `gpt-5-mini` | |
+| Google Gemini | `gemini-2.5-flash` | |
+| Groq | `llama-3.3-70b-versatile` | Fast inference, free tier |
+| OpenRouter | `qwen/qwen3.8-27b:free` | Hundreds of models; `:free` models cost nothing |
+| Ollama | `llama3.2:latest` | Local, no API key |
+
+Mix providers per agent role. API keys can come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, and `OPENROUTER_API_KEY`, so `.aiagentflow/config.json` can be committed without secrets. Plugins can add providers.
 
 ---
 
 ## Configuration
 
-After `aiagentflow init`, your project has:
+`aiagentflow init` creates:
 
 ```
 .aiagentflow/
-├── config.json              # Main configuration
-├── prompts/                 # Customizable agent prompts
-│   ├── architect.md
-│   ├── coder.md
-│   ├── reviewer.md
-│   ├── security.md
-│   ├── tester.md
-│   ├── fixer.md
-│   └── judge.md
-├── context/                 # Reference docs (auto-loaded into every run)
-│   └── api-spec.md          # Example: your API specification
-├── memory/                  # Agent-written knowledge store (auto-managed)
-│   └── *.md                 # One file per memory entry
-├── plugins/                 # Installed plugins
-└── sessions/                # Saved workflow sessions
+├── config.json      # providers, agents, project, workflow, permissions, MCP servers
+├── prompts/         # per-agent prompts you can edit
+├── policies/        # coding standards and QA rules
+├── context/         # reference docs loaded into every run
+├── workflows/       # your workflows
+├── memory/          # agent-written project knowledge
+├── plugins/         # installed plugins
+└── sessions/        # run state and event logs
 ```
+
+What agents may run is controlled by `permissions`:
+
+```json
+"permissions": {
+  "mode": "ask",
+  "allow": ["npm run *"],
+  "deny": ["sudo *", "git push*"]
+}
+```
+
+See [docs/permissions.md](docs/permissions.md).
 
 ---
 
-## Project Structure
+## Extending
 
-```
-src/
-├── cli/            # CLI entry point and commands
-├── core/           # Config system, workflow engine, QA policies
-├── providers/      # LLM provider adapters (Anthropic, OpenAI, Groq, Gemini, OpenRouter, Ollama)
-├── agents/         # Agent implementations and prompt library
-├── memory/         # Agent memory store, loader, and remember tool
-├── mcp/            # MCP client and registry
-├── integrations/   # GitHub CLI integration (--pr, --issue)
-├── plugins/        # Plugin loader and registry
-├── ui/             # Ink-based TUI dashboard
-├── git/            # Git operations wrapper
-├── prompts/        # Default prompt templates
-└── utils/          # Shared utilities (logger, fs, validation)
-```
+- **MCP servers**: give agents tools from any [MCP server](https://github.com/modelcontextprotocol/servers) via `mcpServers` in config.
+- **Plugins**: add tools, providers, and workflow steps. See [docs/plugins.md](docs/plugins.md) and [examples/plugin-no-todos](examples/plugin-no-todos).
 
 ---
 
 ## Development
 
 ```bash
-# Clone and install
 git clone https://github.com/aiagentflow/aiagentflow.git
 cd aiagentflow
-pnpm install
-
-# Run in dev mode
-pnpm dev run "your task here"
-
-# Type check
-pnpm typecheck
-
-# Run tests
-pnpm test
-
-# Lint
-pnpm lint
+npm install
+npm run dev -- run "your task"   # run from source
+npm run typecheck && npm run lint && npm test
 ```
 
----
-
-## Contributing
-
-Contributions are welcome!
-
-1. **Fork** the repo and clone your fork
-2. **Create a branch**: `git checkout -b feature/your-feature`
-3. **Check your work**: `pnpm typecheck && pnpm lint && pnpm test`
-4. **Open a PR** against `main`
-
-### Architecture rules
-
-- Dependency direction flows downward: `cli → core → utils → types`
-- Config types are inferred from Zod schemas, never manually defined
-- New providers only require one adapter file + registry entry
-
----
-
-## Roadmap
-
-- [x] Multi-agent pipeline — 7 specialized agents
-- [x] Context documents — feed specs, PRDs, and guidelines to agents
-- [x] Plan command — generate task lists from documentation
-- [x] All 6 LLM providers — Anthropic, OpenAI, Groq, Gemini, OpenRouter, Ollama
-- [x] Worktree isolation — `--isolate` for clean branch-per-task workflows
-- [x] Plan review gate — `--review-plan` for human-in-the-loop architecture review
-- [x] Parallel batch — `--batch --parallel` for concurrent task execution
-- [x] GitHub integration — `--pr` and `--issue` with auto PR creation
-- [x] MCP tool integration — agents call real tools via MCP servers
-- [x] Plugin system — custom agents and providers via npm or local paths
-- [x] TUI dashboard — live run status, tokens, and costs
-- [x] Agent memory — persistent knowledge store across workflow runs
-- [ ] VSCode extension
-- [ ] Watch mode — auto-run on file save
-
----
+Project work is tracked with [Backlog.md](https://github.com/MrLesk/Backlog.md) in `backlog/`.
 
 ## License
 
 [MIT](LICENSE)
-
----
 
 <p align="center">
   <a href="https://aiagentflow.dev">aiagentflow.dev</a>
