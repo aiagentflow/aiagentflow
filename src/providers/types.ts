@@ -55,6 +55,8 @@ export interface ToolCall {
     readonly input: Record<string, unknown>;
     /** Provider-internal call ID (needed to send the result back). */
     readonly callId: string;
+    /** Opaque provider data that must be sent back with this call (e.g. Gemini thought signatures). */
+    readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 /** The result of executing a tool call. */
