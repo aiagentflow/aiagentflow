@@ -278,7 +278,7 @@ function isWithin(root: string, abs: string): boolean {
  * All files under root as POSIX relative paths, honouring .gitignore when
  * root is in a git repository (tracked + untracked, minus ignored).
  */
-async function listFiles(root: string): Promise<string[]> {
+export async function listFiles(root: string): Promise<string[]> {
     try {
         const { stdout } = await execa('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root });
         return stdout.split('\0').filter(f => f && existsSync(join(root, f))).sort();
