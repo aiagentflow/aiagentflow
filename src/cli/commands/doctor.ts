@@ -15,7 +15,11 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { configExists, loadConfig } from '../../core/config/manager.js';
 import { getPromptsDir, getPoliciesDir } from '../../prompts/library.js';
-import { validateAllProviders } from '../../providers/registry.js';
+import { createProvider, validateAllProviders } from '../../providers/registry.js';
+import { PROVIDER_DEFAULT_MODELS } from '../../providers/metadata.js';
+import type { LLMProviderName } from '../../providers/types.js';
+import type { ProviderConfig } from '../../core/config/types.js';
+import { COST_PER_1M_TOKENS } from '../../core/workflow/token-tracker.js';
 import { ALL_AGENT_ROLES } from '../../agents/types.js';
 import type { AgentRole } from '../../agents/types.js';
 import { logger } from '../../utils/logger.js';
@@ -51,6 +55,48 @@ function printResult(result: CheckResult): void {
             console.log(chalk.gray(`    → ${result.detail}`));
         }
     }
+}
+
+function printWarning(message: string): void {
+    console.log(chalk.yellow(`  ! ${message}`));
+}
+
+/**
+ * Warn about agent models that a reachable provider does not list (retired,
+ * misspelled, or not pulled for Ollama) and models without pricing data.
+ * Warnings, not failures: a provider's list can lag behind what it serves.
+ */
+export async function checkModels(
+    config: { agents: Record<string, { provider: string; model: string }>; providers: ProviderConfig },
+    reachableProviders: readonly string[],
+): Promise<string[]> {
+    const warnings: string[] = [];
+    const listed = new Map<string, Set<string> | undefined>();
+
+    for (const [role, { provider, model }] of Object.entries(config.agents)) {
+        if (!listed.has(provider)) {
+            let ids: Set<string> | undefined;
+            if (reachableProviders.includes(provider)) {
+                try {
+                    ids = new Set((await createProvider(provider, config.providers).listModels()).map(m => m.id));
+                } catch {
+                    ids = undefined;
+                }
+            }
+            listed.set(provider, ids);
+        }
+
+        const ids = listed.get(provider);
+        if (ids && ids.size > 0 && !ids.has(model)) {
+            warnings.push(provider === 'ollama'
+                ? `${role}: "${model}" is not installed in Ollama. Run: ollama pull ${model}`
+                : `${role}: ${provider} does not list "${model}". It may be retired or misspelled; the default is "${PROVIDER_DEFAULT_MODELS[provider as LLMProviderName] ?? 'n/a'}".`);
+        }
+        if (provider !== 'ollama' && !model.endsWith(':free') && !COST_PER_1M_TOKENS[model]) {
+            warnings.push(`${role}: no pricing data for "${model}"; cost estimates will show "-".`);
+        }
+    }
+    return warnings;
 }
 
 /** Check Node.js version meets minimum requirement. */
@@ -218,6 +264,17 @@ export const doctorCommand = new Command('doctor')
                 printResult(skip(`${name} — not configured`));
             }
         }
+
+        // ── Models ──
+        console.log();
+        logger.header('Models');
+
+        const reachable = Object.entries(results).filter(([, ok]) => ok).map(([name]) => name);
+        const modelSpinner = ora('Checking models...').start();
+        const modelWarnings = await checkModels(config, reachable);
+        modelSpinner.stop();
+        for (const w of modelWarnings) printWarning(w);
+        if (modelWarnings.length === 0) printResult(pass('Every agent model is offered by its provider'));
 
         // ── Summary ──
         console.log();
