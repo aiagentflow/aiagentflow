@@ -27,6 +27,7 @@ import { logger } from '../../utils/logger.js';
 import { buildTestCommand } from '../../utils/package-manager.js';
 import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
 import { confirmCommand } from '../../cli/utils/confirm-command.js';
+import type { ConfirmAnswer } from '../../tools/command.js';
 import { failRun, mergeFiles, type FailureKind, type StepRecord, type WorkflowContext } from './engine.js';
 import { nextStep, stepById, stepRunner, type WorkflowDefinition, type WorkflowStep } from './definition.js';
 import { parseAndWriteFiles } from './file-parser.js';
@@ -62,6 +63,10 @@ export interface ExecutorParams {
     budget?: BudgetLimits;
     /** When the run started (for the time budget); defaults to now. */
     startedAt?: number;
+    /** Approves commands instead of the terminal prompt (used even in auto runs). */
+    confirmCommand?: (command: string) => Promise<ConfirmAnswer>;
+    /** Stops the run before its next step when aborted. */
+    signal?: AbortSignal;
     /** Called after every step (crash recovery). */
     onStep?: (ctx: WorkflowContext) => void;
 }
@@ -92,6 +97,11 @@ export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowC
         const step = ctx.step ? stepById(workflow, ctx.step) : undefined;
         if (!step) {
             ctx = failRun(ctx, `Workflow "${workflow.name}" has no step "${ctx.step ?? ''}"`);
+            break;
+        }
+
+        if (params.signal?.aborted) {
+            ctx = failRun(ctx, 'Cancelled', 'aborted');
             break;
         }
 
@@ -286,13 +296,13 @@ async function runAgentStep(step: AgentStep, ctx: WorkflowContext, p: ExecutorPa
             p.events!.emit({ type: 'tool.result', step: step.id, agent: step.agent, tool: call.name, isError: result.isError === true });
         } : undefined,
         // Pause the spinner while asking, so the prompt stays readable
-        confirmCommand: auto ? undefined : async (command) => {
+        confirmCommand: p.confirmCommand ?? (auto ? undefined : async (command) => {
             const spinning = spinner.isSpinning;
             spinner.stop();
             const answer = await confirmCommand(command);
             if (spinning) spinner.start();
             return answer;
-        },
+        }),
     });
 
     const repoMap = !config.workflow.legacyFileBlocks && config.project.repoMapTokens > 0
