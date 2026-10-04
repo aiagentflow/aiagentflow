@@ -145,6 +145,7 @@ More: [docs/headless.md](docs/headless.md).
 | `acp` | Run as an [ACP](docs/acp.md) server for editors such as Zed |
 | `memory list\|show\|edit\|rm\|clear` | Manage agent memory |
 | `mcp list\|test` | MCP servers |
+| `mcp serve` | Run as an [MCP server](docs/mcp-server.md) so other agents can call aiagentflow |
 | `plugin list\|install\|remove` | Plugins |
 | `ui` | Live terminal dashboard |
 | `doctor` | Check setup, providers, and models |
