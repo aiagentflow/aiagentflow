@@ -14,6 +14,7 @@ import { listWorktrees } from '../../git/worktree.js';
 import { listSessions, type SessionData } from '../../core/workflow/session.js';
 import { loadConfig, configExists } from '../../core/config/manager.js';
 import { logger } from '../../utils/logger.js';
+import { costOf } from '../../core/workflow/token-tracker.js';
 
 type RunState = 'complete' | 'qa_approved' | 'failed' | 'awaiting_approval' | 'running' | string;
 
@@ -45,24 +46,9 @@ function stateColor(state: string): (s: string) => string {
     return chalk.yellow;
 }
 
-/** Estimate cost for a session's token usage entries. */
-const COST_PER_1M: Record<string, { input: number; output: number }> = {
-    'claude-sonnet-4-20250514': { input: 3.00, output: 15.00 },
-    'claude-3-5-haiku-20241022': { input: 1.00, output: 5.00 },
-    'claude-3-opus-20240229': { input: 15.00, output: 75.00 },
-    'llama3.2:latest': { input: 0, output: 0 },
-};
-
+/** Estimated USD cost of a session's token usage. */
 function sessionCost(session: SessionData): number {
-    let cost = 0;
-    for (const entry of session.tokenUsage ?? []) {
-        const pricing = COST_PER_1M[entry.model];
-        if (pricing) {
-            cost += (entry.promptTokens / 1_000_000) * pricing.input;
-            cost += (entry.completionTokens / 1_000_000) * pricing.output;
-        }
-    }
-    return cost;
+    return (session.tokenUsage ?? []).reduce((sum, entry) => sum + costOf(entry), 0);
 }
 
 export const runsCommand = new Command('runs')

@@ -159,6 +159,10 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
         const sessions = listSessions(dir);
         expect(sessions).toHaveLength(1);
         expect(sessions[0]!.context.state).toBe('qa_approved');
+        // Usage comes from the provider: 10 prompt tokens per call in the mock
+        const usage = sessions[0]!.tokenUsage;
+        expect(usage.map(u => u.role)).toEqual(['architect', 'coder', 'reviewer', 'security', 'tester', 'judge']);
+        expect(usage.every(u => u.promptTokens === 10)).toBe(true);
     });
 
     describe('with tool-driven agents', () => {

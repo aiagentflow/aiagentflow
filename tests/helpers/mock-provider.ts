@@ -85,7 +85,7 @@ export class MockProvider implements LLMProvider {
         if (response.toolCalls.length > 0) {
             yield { content: '', done: false, toolCalls: response.toolCalls };
         }
-        yield { content: '', done: true, stopReason: response.stopReason };
+        yield { content: '', done: true, stopReason: response.stopReason, usage: response.usage };
     }
 
     async listModels(): Promise<ModelInfo[]> {

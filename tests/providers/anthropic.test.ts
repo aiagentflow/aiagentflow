@@ -91,4 +91,25 @@ describe('AnthropicProvider tool calling', () => {
         expect(chunks.flatMap(c => c.toolCalls ?? [])).toEqual([{ callId: 'toolu_9', name: 'list_dir', input: { path: 'src' } }]);
         expect(chunks.at(-1)).toMatchObject({ done: true, stopReason: 'tool_use' });
     });
+
+    it('counts cached input in promptTokens and reports cache reads/writes', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            stop_reason: 'end_turn', content: [{ type: 'text', text: 'ok' }],
+            usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 },
+        })));
+        const res = await provider.chat([{ role: 'user', content: 'hi' }]);
+        expect(res.usage).toEqual({ promptTokens: 1050, completionTokens: 20, totalTokens: 1070, cacheReadTokens: 900, cacheWriteTokens: 50 });
+    });
+
+    it('reports stream usage from message_start and message_delta', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
+            { type: 'message_start', message: { usage: { input_tokens: 40, cache_read_input_tokens: 60, output_tokens: 1 } } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hi' } },
+            { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 15 } },
+            { type: 'message_stop' },
+        ])));
+        const chunks: ChatChunk[] = [];
+        for await (const c of provider.stream([{ role: 'user', content: 'hi' }])) chunks.push(c);
+        expect(chunks.at(-1)?.usage).toEqual({ promptTokens: 100, completionTokens: 15, totalTokens: 115, cacheReadTokens: 60 });
+    });
 });

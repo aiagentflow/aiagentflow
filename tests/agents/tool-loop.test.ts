@@ -96,4 +96,23 @@ describe('BaseAgent tool loop', () => {
         expect(completed).toBe('done.');
         expect(provider.calls[1]!.messages[2]).toMatchObject({ role: 'tool', results: [{ content: 'echo {"f":"a"}' }] });
     });
+
+    it('sums provider-reported usage across streamed turns', async () => {
+        const provider = new MockProvider([{ content: 'a', toolCalls: [{ name: 'echo', input: {} }] }, 'done']);
+        const out = await makeAgent(provider, { tools: new ToolRegistry([echoTool().tool]) }).executeStreaming({ task: 't' });
+        expect(out.usage).toEqual({ promptTokens: 20, completionTokens: 2, totalTokens: 22 });
+        expect(out.tokensUsed).toBe(22);
+    });
+
+    it('estimates only when a stream reports no usage', async () => {
+        const silent: LLMProvider = {
+            name: 'ollama',
+            chat: async () => { throw new Error('unused'); },
+            async *stream() { yield { content: '12345678', done: false }; yield { content: '', done: true }; },
+            listModels: async () => [],
+            validateConnection: async () => true,
+        };
+        const out = await makeAgent(silent).executeStreaming({ task: 't' });
+        expect(out.usage).toEqual({ promptTokens: 0, completionTokens: 2, totalTokens: 2 });
+    });
 });

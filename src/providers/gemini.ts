@@ -114,6 +114,8 @@ export class GeminiProvider implements LLMProvider {
         let buffer = '';
         let sawToolCall = false;
         let callIndex = 0;
+        // usageMetadata is cumulative; the last one seen covers the whole response
+        let usage: TokenUsage | undefined;
 
         try {
             while (true) {
@@ -129,12 +131,17 @@ export class GeminiProvider implements LLMProvider {
                     const data = line.slice(6).trim();
                     if (!data) continue;
 
-                    let event: { candidates?: Array<{ content?: { parts?: GeminiPart[] }; finishReason?: string }> };
+                    let event: {
+                        candidates?: Array<{ content?: { parts?: GeminiPart[] }; finishReason?: string }>;
+                        usageMetadata?: GeminiUsage;
+                    };
                     try {
                         event = JSON.parse(data);
                     } catch {
                         continue; // Skip unparseable lines
                     }
+
+                    if (event.usageMetadata) usage = toUsage(event.usageMetadata);
 
                     const candidate = event.candidates?.[0];
                     const parts = candidate?.content?.parts ?? [];
@@ -153,7 +160,7 @@ export class GeminiProvider implements LLMProvider {
 
                     if (candidate?.finishReason) {
                         const stopReason = sawToolCall ? 'tool_use' : normalizeStopReason(candidate.finishReason);
-                        yield { content: '', done: true, stopReason };
+                        yield { content: '', done: true, stopReason, ...(usage ? { usage } : {}) };
                         return;
                     }
                 }
@@ -162,7 +169,7 @@ export class GeminiProvider implements LLMProvider {
             reader.releaseLock();
         }
 
-        yield { content: '', done: true };
+        yield { content: '', done: true, ...(usage ? { usage } : {}) };
     }
 
     /**
@@ -245,13 +252,30 @@ export class GeminiProvider implements LLMProvider {
     }
 
     private extractUsage(response: Record<string, unknown>): TokenUsage {
-        const usage = response.usageMetadata as Record<string, number> | undefined;
-        return {
-            promptTokens: usage?.promptTokenCount ?? 0,
-            completionTokens: usage?.candidatesTokenCount ?? 0,
-            totalTokens: usage?.totalTokenCount ?? 0,
-        };
+        return toUsage(response.usageMetadata as GeminiUsage | undefined);
     }
+}
+
+/** Usage counters as Gemini reports them. promptTokenCount includes cached content. */
+interface GeminiUsage {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+    cachedContentTokenCount?: number;
+    thoughtsTokenCount?: number;
+}
+
+function toUsage(usage: GeminiUsage | undefined): TokenUsage {
+    const promptTokens = usage?.promptTokenCount ?? 0;
+    // Thinking tokens are billed as output
+    const completionTokens = (usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0);
+    const cacheRead = usage?.cachedContentTokenCount ?? 0;
+    return {
+        promptTokens,
+        completionTokens,
+        totalTokens: usage?.totalTokenCount ?? promptTokens + completionTokens,
+        ...(cacheRead ? { cacheReadTokens: cacheRead } : {}),
+    };
 }
 
 /** A content part in the Gemini wire format. */

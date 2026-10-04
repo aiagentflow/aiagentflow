@@ -124,3 +124,15 @@ describe('toGeminiSchema', () => {
         });
     });
 });
+
+describe('Gemini usage', () => {
+    it('counts thinking tokens as output and reports cached content', async () => {
+        stubFetch(sseResponse([
+            { candidates: [{ content: { parts: [{ text: 'a' }] } }], usageMetadata: { promptTokenCount: 10 } },
+            { candidates: [{ content: { parts: [{ text: 'b' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 5, thoughtsTokenCount: 7, totalTokenCount: 62, cachedContentTokenCount: 40 } },
+        ]));
+        const chunks: ChatChunk[] = [];
+        for await (const c of provider.stream([{ role: 'user', content: 'hi' }])) chunks.push(c);
+        expect(chunks.at(-1)?.usage).toEqual({ promptTokens: 50, completionTokens: 12, totalTokens: 62, cacheReadTokens: 40 });
+    });
+});

@@ -5,7 +5,7 @@
  * Used by: provider adapters
  */
 
-import type { StopReason } from './types.js';
+import type { StopReason, TokenUsage } from './types.js';
 
 /**
  * Map a provider finish reason to a normalized StopReason.
@@ -29,4 +29,20 @@ export function normalizeStopReason(raw: string | undefined | null): StopReason 
         default:
             return 'other';
     }
+}
+
+/** Usage with every counter at zero. */
+export const EMPTY_USAGE: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
+/** Sum two usage records. Cache counters are kept only when either side has them. */
+export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+    const cacheRead = (a.cacheReadTokens ?? 0) + (b.cacheReadTokens ?? 0);
+    const cacheWrite = (a.cacheWriteTokens ?? 0) + (b.cacheWriteTokens ?? 0);
+    return {
+        promptTokens: a.promptTokens + b.promptTokens,
+        completionTokens: a.completionTokens + b.completionTokens,
+        totalTokens: a.totalTokens + b.totalTokens,
+        ...(cacheRead ? { cacheReadTokens: cacheRead } : {}),
+        ...(cacheWrite ? { cacheWriteTokens: cacheWrite } : {}),
+    };
 }

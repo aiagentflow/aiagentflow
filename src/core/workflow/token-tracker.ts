@@ -12,26 +12,48 @@ import chalk from 'chalk';
 import type { AgentRole } from '../../agents/types.js';
 import { AGENT_ROLE_LABELS } from '../../agents/types.js';
 import { logger } from '../../utils/logger.js';
+import type { TokenUsage } from '../../providers/types.js';
 
 /** Token usage for a single agent call. */
 export interface TokenUsageEntry {
     role: AgentRole;
     model: string;
+    /** All input tokens, including cached ones. */
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Input tokens read from the prompt cache (subset of promptTokens). */
+    cacheReadTokens?: number;
+    /** Input tokens written to the prompt cache (subset of promptTokens). */
+    cacheWriteTokens?: number;
     timestamp: number;
 }
 
+/**
+ * USD per 1M tokens. Cache prices default to the input price when a model
+ * does not list them, which over-estimates rather than hides cost.
+ */
+export interface ModelPricing {
+    input: number;
+    output: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+}
+
+/** Anthropic bills cache reads at 0.1x and cache writes at 1.25x the input price. */
+function anthropic(input: number, output: number): ModelPricing {
+    return { input, output, cacheRead: input * 0.1, cacheWrite: input * 1.25 };
+}
+
 /** Estimated cost per 1M tokens for known models. */
-export const COST_PER_1M_TOKENS: Record<string, { input: number; output: number }> = {
+export const COST_PER_1M_TOKENS: Record<string, ModelPricing> = {
     // Anthropic
-    'claude-sonnet-4-20250514': { input: 3.00, output: 15.00 },
-    'claude-opus-4-7': { input: 15.00, output: 75.00 },
-    'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
-    'claude-haiku-4-5-20251001': { input: 0.80, output: 4.00 },
-    'claude-3-5-haiku-20241022': { input: 1.00, output: 5.00 },
-    'claude-3-opus-20240229': { input: 15.00, output: 75.00 },
+    'claude-sonnet-4-20250514': anthropic(3.00, 15.00),
+    'claude-opus-4-7': anthropic(15.00, 75.00),
+    'claude-sonnet-4-6': anthropic(3.00, 15.00),
+    'claude-haiku-4-5-20251001': anthropic(0.80, 4.00),
+    'claude-3-5-haiku-20241022': anthropic(1.00, 5.00),
+    'claude-3-opus-20240229': anthropic(15.00, 75.00),
     // OpenAI
     'gpt-4o': { input: 2.50, output: 10.00 },
     'gpt-4o-mini': { input: 0.15, output: 0.60 },
@@ -60,6 +82,24 @@ export const COST_PER_1M_TOKENS: Record<string, { input: number; output: number 
 };
 
 /**
+ * Estimated USD cost of one usage entry, or 0 for unknown models.
+ * Cached input is priced at the cache rates; the rest at the input rate.
+ */
+export function costOf(entry: Pick<TokenUsageEntry, 'model' | 'promptTokens' | 'completionTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>): number {
+    const pricing = COST_PER_1M_TOKENS[entry.model];
+    if (!pricing) return 0;
+    const cacheRead = entry.cacheReadTokens ?? 0;
+    const cacheWrite = entry.cacheWriteTokens ?? 0;
+    const uncached = Math.max(0, entry.promptTokens - cacheRead - cacheWrite);
+    return (
+        uncached * pricing.input +
+        cacheRead * (pricing.cacheRead ?? pricing.input) +
+        cacheWrite * (pricing.cacheWrite ?? pricing.input) +
+        entry.completionTokens * pricing.output
+    ) / 1_000_000;
+}
+
+/**
  * Token usage tracker for a workflow run.
  */
 export class TokenTracker {
@@ -71,7 +111,7 @@ export class TokenTracker {
     record(
         role: AgentRole,
         model: string,
-        usage: { promptTokens: number; completionTokens: number; totalTokens: number },
+        usage: TokenUsage,
     ): void {
         this.entries.push({
             role,
@@ -79,6 +119,8 @@ export class TokenTracker {
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
             totalTokens: usage.totalTokens,
+            ...(usage.cacheReadTokens ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+            ...(usage.cacheWriteTokens ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
             timestamp: Date.now(),
         });
     }
@@ -114,17 +156,7 @@ export class TokenTracker {
      * Estimate total cost in USD based on known model pricing.
      */
     estimateCost(): number {
-        let totalCost = 0;
-
-        for (const entry of this.entries) {
-            const pricing = COST_PER_1M_TOKENS[entry.model];
-            if (pricing) {
-                totalCost += (entry.promptTokens / 1_000_000) * pricing.input;
-                totalCost += (entry.completionTokens / 1_000_000) * pricing.output;
-            }
-        }
-
-        return totalCost;
+        return this.entries.reduce((sum, e) => sum + costOf(e), 0);
     }
 
     /**
@@ -145,14 +177,11 @@ export class TokenTracker {
         logger.header('Run Summary');
 
         // Per-agent breakdown: tokens + cost
-        const byRole: Record<string, { tokens: number; promptTokens: number; completionTokens: number; model: string }> = {};
+        const byRole: Record<string, { tokens: number; cost: number; model: string }> = {};
         for (const entry of this.entries) {
-            if (!byRole[entry.role]) {
-                byRole[entry.role] = { tokens: 0, promptTokens: 0, completionTokens: 0, model: entry.model };
-            }
-            byRole[entry.role]!.tokens += entry.totalTokens;
-            byRole[entry.role]!.promptTokens += entry.promptTokens;
-            byRole[entry.role]!.completionTokens += entry.completionTokens;
+            const row = byRole[entry.role] ?? (byRole[entry.role] = { tokens: 0, cost: 0, model: entry.model });
+            row.tokens += entry.totalTokens;
+            row.cost += costOf(entry);
         }
 
         const colWidths = [22, 12, 12, 10];
@@ -163,12 +192,7 @@ export class TokenTracker {
         let totalCost = 0;
         for (const [role, data] of Object.entries(byRole)) {
             const label = AGENT_ROLE_LABELS[role as AgentRole] ?? role;
-            const pricing = COST_PER_1M_TOKENS[data.model];
-            let cost = 0;
-            if (pricing) {
-                cost = (data.promptTokens / 1_000_000) * pricing.input
-                    + (data.completionTokens / 1_000_000) * pricing.output;
-            }
+            const cost = data.cost;
             totalCost += cost;
             const costStr = cost > 0 ? `$${cost.toFixed(4)}` : '—';
             const shortModel = data.model.length > 22 ? data.model.slice(0, 19) + '...' : data.model;
@@ -181,6 +205,12 @@ export class TokenTracker {
         const totalStr = `  ${'Total'.padEnd(colWidths[0]!)}${this.getTotalTokens().toLocaleString().padEnd(colWidths[1]!)}`;
         const costTotal = totalCost > 0 ? chalk.yellow(`$${totalCost.toFixed(4)}`) : chalk.gray('—');
         console.log(chalk.bold(totalStr) + costTotal);
+
+        const prompt = this.entries.reduce((s, e) => s + e.promptTokens, 0);
+        const cached = this.entries.reduce((s, e) => s + (e.cacheReadTokens ?? 0), 0);
+        if (cached > 0 && prompt > 0) {
+            console.log(chalk.gray(`  Cache reads: ${cached.toLocaleString()} of ${prompt.toLocaleString()} input tokens (${Math.round((cached / prompt) * 100)}%)`));
+        }
 
         if (elapsedMs !== undefined) {
             console.log(chalk.gray(`  Wall clock: ${formatDuration(elapsedMs)}`));

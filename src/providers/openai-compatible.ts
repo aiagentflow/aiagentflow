@@ -65,6 +65,17 @@ interface StreamEvent {
         };
         finish_reason?: string | null;
     }>;
+    usage?: ApiUsage | null;
+    /** Groq reports stream usage here. */
+    x_groq?: { usage?: ApiUsage };
+}
+
+/** Usage counters in the Chat Completions format. prompt_tokens includes cached tokens. */
+interface ApiUsage {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
 }
 
 /**
@@ -109,7 +120,8 @@ export abstract class OpenAICompatibleProvider implements LLMProvider {
 
     async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<ChatChunk> {
         const model = options?.model ?? this.settings.defaultModel;
-        const body = { ...this.buildBody(messages, options, model), stream: true };
+        // include_usage adds a final chunk with token counts
+        const body = { ...this.buildBody(messages, options, model), stream: true, stream_options: { include_usage: true } };
         this.beforeRequest(model);
 
         const response = await this.post('/chat/completions', body);
@@ -121,6 +133,7 @@ export abstract class OpenAICompatibleProvider implements LLMProvider {
         const decoder = new TextDecoder();
         let buffer = '';
         let finishReason: string | undefined;
+        let usage: TokenUsage | undefined;
         // Tool calls arrive as fragments keyed by index; arguments stream as partial JSON
         const pending = new Map<number, { id: string; name: string; args: string }>();
 
@@ -148,7 +161,7 @@ export abstract class OpenAICompatibleProvider implements LLMProvider {
                     if (data === '[DONE]') {
                         const tools = flushTools();
                         if (tools) yield tools;
-                        yield { content: '', done: true, stopReason: normalizeStopReason(finishReason) };
+                        yield { content: '', done: true, stopReason: normalizeStopReason(finishReason), ...(usage ? { usage } : {}) };
                         return;
                     }
 
@@ -158,6 +171,9 @@ export abstract class OpenAICompatibleProvider implements LLMProvider {
                     } catch {
                         continue; // Skip unparseable lines
                     }
+
+                    const reported = event.usage ?? event.x_groq?.usage;
+                    if (reported) usage = toUsage(reported);
 
                     const choice = event.choices?.[0];
                     const delta = choice?.delta;
@@ -186,7 +202,7 @@ export abstract class OpenAICompatibleProvider implements LLMProvider {
 
         const tools = flushTools();
         if (tools) yield tools;
-        yield { content: '', done: true, stopReason: normalizeStopReason(finishReason) };
+        yield { content: '', done: true, stopReason: normalizeStopReason(finishReason), ...(usage ? { usage } : {}) };
     }
 
     async listModels(): Promise<ModelInfo[]> {
@@ -291,10 +307,19 @@ function parseToolCall(call: ApiToolCall): ToolCall {
 }
 
 function extractUsage(json: Record<string, unknown>): TokenUsage {
-    const usage = json.usage as Record<string, number> | undefined;
+    return toUsage(json.usage as ApiUsage | undefined);
+}
+
+function toUsage(usage: ApiUsage | undefined): TokenUsage {
     const promptTokens = usage?.prompt_tokens ?? 0;
     const completionTokens = usage?.completion_tokens ?? 0;
-    return { promptTokens, completionTokens, totalTokens: usage?.total_tokens ?? promptTokens + completionTokens };
+    const cacheRead = usage?.prompt_tokens_details?.cached_tokens ?? 0;
+    return {
+        promptTokens,
+        completionTokens,
+        totalTokens: usage?.total_tokens ?? promptTokens + completionTokens,
+        ...(cacheRead ? { cacheReadTokens: cacheRead } : {}),
+    };
 }
 
 /** Append `/v1` unless the URL already ends with it. */
