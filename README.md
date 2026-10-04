@@ -23,6 +23,7 @@ plan → implement → review → security → test → judge
 - **Agents work through tools.** They explore with `list_dir`, `grep`, and `read_file`, change code with `edit_file` and `write_file`, and verify with `run_command`, within a permission policy you control.
 - **Gates are real.** Reviewer, security, and judge submit structured verdicts with typed issues; lint and tests run for real. Any failure routes to the fixer with the exact problem.
 - **Pipelines are YAML.** Use a built-in workflow or write your own, including steps from plugins.
+- **Bring other agents.** Any coder, fixer, or tester step can run Claude Code, OpenCode, or another agent CLI, with aiagentflow's gates still deciding.
 - **Runs are isolated.** Each task runs on its own branch in a git worktree, so your working directory is untouched until you merge.
 - **Agents remember.** Conventions, decisions, and gotchas are saved to `.aiagentflow/memory/` so later runs start smarter.
 

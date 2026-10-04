@@ -72,9 +72,45 @@ Validate with `aiagentflow workflow validate`.
 | `next` | Step to run after this one succeeds (default: the next `always` step). |
 | `approval` | Pause for a human to approve, edit, or regenerate the output. Skipped with `--auto` and `--headless`. |
 | `maxTurns` | Max model turns that may call tools in this step. |
+| `external` | Run this coder, fixer, or tester step with another agent CLI (below). |
 
 ## How a run moves
 
 Each step runs its agent (or plugin step), then its checks, then its gate. A failure jumps to `onFail` and counts one iteration; reaching `maxIterations` fails the run. Success continues to `next`. The run passes when the last step succeeds.
 
 The fixer receives the most recent failure: review issues, security findings, lint errors, or test output.
+
+## Delegating steps to other agents
+
+A coder, fixer, or tester step can run another agent CLI instead of aiagentflow's own agent. aiagentflow still runs the checks and gates, sends failures back to the fixer, and records what changed.
+
+```yaml
+steps:
+  - id: implement
+    agent: coder
+    external:
+      cli: claude-code            # claude-code | opencode | command
+      model: claude-sonnet-5-5    # optional
+  - id: review
+    agent: reviewer
+    gate: verdict
+    onFail: fix
+  - id: fix
+    agent: fixer
+    trigger: on-fail
+    external:
+      cli: command
+      args: [codex, exec, --full-auto, "{prompt}"]
+    next: review
+```
+
+| `external` field | |
+|---|---|
+| `cli` | `claude-code` runs `claude -p ... --output-format json --permission-mode acceptEdits`; `opencode` runs `opencode run --format json ...`; `command` runs `args` as given with `{prompt}` replaced. |
+| `model` | Passed as the CLI's model flag. |
+| `args` | Extra arguments (for `command`, the whole command line). |
+| `bin` | Path to the CLI if it is not on `PATH`. |
+| `timeoutMinutes` | Default 30. |
+
+The external agent works in the run's directory (the worktree, by default). Changed files are detected with git; the diff and any cost the CLI reports (Claude Code does) are stored in the session. The external CLI applies its own permission rules, not aiagentflow's `permissions`.
+
