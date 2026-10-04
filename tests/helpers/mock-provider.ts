@@ -1,5 +1,5 @@
 /**
- * MockProvider — scripted LLM provider for deterministic workflow tests.
+ * MockProvider: scripted LLM provider for deterministic workflow tests.
  *
  * Replays a queue of responses in order. A step with `toolCalls` returns them
  * with stopReason `tool_use`; the agent executes them and calls again, which

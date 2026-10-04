@@ -1,5 +1,5 @@
 /**
- * TUI Activity screen — live feed of the most recent run's events.
+ * TUI Activity screen: live feed of the most recent run's events.
  *
  * Tails the run's event log (.aiagentflow/sessions/<id>.events.ndjson),
  * written by the runner's EventBus, so it works for runs in any process.
@@ -69,7 +69,7 @@ export function Activity({ projectRoot }: Props): React.JSX.Element {
         <Box flexDirection="column">
             <Box paddingLeft={2} marginBottom={1}>
                 <Text bold>Latest run </Text>
-                <Text color="gray">{session.id} — {runLabel(session.context)}</Text>
+                <Text color="gray">{session.id} ({runLabel(session.context)})</Text>
             </Box>
             {events.length === 0 && (
                 <Box paddingLeft={2}>

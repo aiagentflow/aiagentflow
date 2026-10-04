@@ -1,5 +1,5 @@
 /**
- * Budgets — token, cost, and time caps for runs and batches.
+ * Budgets: token, cost, and time caps for runs and batches.
  *
  * A single run checks `budgetExceeded` after every model turn. In batch mode,
  * tasks report their usage to a shared BudgetTracker; each new task gets the

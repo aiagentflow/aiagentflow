@@ -1,5 +1,5 @@
 /**
- * `aiagentflow workflow` — list, show, and validate workflow definitions.
+ * `aiagentflow workflow`: list, show, and validate workflow definitions.
  *
  * Subcommands:
  *   list              Show available workflows and their steps

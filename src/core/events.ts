@@ -1,5 +1,5 @@
 /**
- * Run events — a typed record of what happens during a workflow run.
+ * Run events: a typed record of what happens during a workflow run.
  *
  * The executor and runner emit events on an EventBus. Subscribers turn them
  * into NDJSON on stdout (`--output json`), a per-session event log that the

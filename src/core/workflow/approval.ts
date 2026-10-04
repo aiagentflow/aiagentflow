@@ -77,7 +77,7 @@ export async function requestStepReview(label: string, output: string): Promise<
     console.log();
 
     const preview = output.length > 1200
-        ? output.slice(0, 1200) + chalk.gray('\n... (truncated — choose Edit to see all of it)')
+        ? output.slice(0, 1200) + chalk.gray('\n... (truncated; choose Edit to see all of it)')
         : output;
     console.log(preview);
     console.log();
@@ -87,9 +87,9 @@ export async function requestStepReview(label: string, output: string): Promise<
         name: 'action',
         message: 'Review this before the workflow continues:',
         choices: [
-            { title: chalk.green('✔ Approve') + ' — continue with this output', value: 'approve' },
+            { title: chalk.green('✔ Approve') + ': continue with this output', value: 'approve' },
             { title: chalk.yellow('✎ Edit') + ' — open in $EDITOR to modify', value: 'edit' },
-            { title: chalk.blue('↻ Regenerate') + ' — run this step again with feedback', value: 'regenerate' },
+            { title: chalk.blue('↻ Regenerate') + ': run this step again with feedback', value: 'regenerate' },
             { title: chalk.red('✘ Abort') + ' — stop the workflow', value: 'abort' },
         ],
         initial: 0,
