@@ -72,9 +72,11 @@ describe('aiagentflow review', () => {
         expect(readFileSync(join(dir, 'src', 'app.ts'), 'utf-8')).toContain('i <= n');
     });
 
-    it('passes when findings are below --fail-on', async () => {
+    it('passes when findings are below --fail-on, and writes --report', async () => {
         holder.provider = new MockProvider([verdict('request_changes', [HIGH_ISSUE]), verdict('pass')]);
-        expect(await runReview(options({ failOn: 'critical' }), dir)).toBe(0);
+        const report = join(dir, 'review.md');
+        expect(await runReview(options({ failOn: 'critical', report }), dir)).toBe(0);
+        expect(readFileSync(report, 'utf-8')).toContain('Result: passing, no issues at or above "critical".');
     });
 
     it('exits 0 with nothing to review', async () => {

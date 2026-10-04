@@ -10,6 +10,7 @@
  */
 
 import { Command, Option } from 'commander';
+import { writeFileSync } from 'node:fs';
 import { configExists } from '../../core/config/manager.js';
 import { runWorkflow } from '../../core/workflow/runner.js';
 import { getWorkflow } from '../../core/workflow/workflow-loader.js';
@@ -39,6 +40,7 @@ export interface ReviewCommandOptions extends BudgetFlags {
     workflow?: string;
     failOn: FailOn;
     comment?: boolean;
+    report?: string;
     output: OutputFormat;
     stream: boolean;
 }
@@ -51,6 +53,7 @@ export const reviewCommand = addBudgetOptions(new Command('review')
     .option('-w, --workflow <name>', 'Workflow to run instead of the built-in reviewer + security review')
     .addOption(new Option('--fail-on <severity>', 'Exit 1 when an issue is at or above this severity').choices([...FAIL_ON_VALUES]).default('high'))
     .option('--comment', 'Post the findings as an inline review on the PR (with --pr)')
+    .option('--report <file>', 'Also write the markdown report to this file')
     .addOption(new Option('--output <format>', 'text (default) or json: NDJSON run events on stdout').choices([...OUTPUT_FORMATS]).default('text'))
     .option('--no-stream', 'Disable real-time streaming of agent output'))
     .action(async (options: ReviewCommandOptions) => {
@@ -108,6 +111,7 @@ export async function runReview(options: ReviewCommandOptions, projectRoot = pro
 
         const report = formatReviewReport(diff.label, ctx.verdicts, options.failOn);
         if (options.output !== 'json') console.log(`\n${report}\n`);
+        if (options.report) writeFileSync(options.report, `${report}\n`);
 
         if (options.comment && options.pr) {
             const { comments, unplaced } = buildReviewComments(collectFindings(ctx.verdicts), diff.diff);
