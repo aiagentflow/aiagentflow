@@ -205,6 +205,36 @@ export function buildPRTask(ctx: PullRequestContext): string {
     return parts.join('\n');
 }
 
+/** One inline comment on a PR review. */
+export interface ReviewCommentInput {
+    path: string;
+    /** Line on the new side of the diff. */
+    line: number;
+    body: string;
+}
+
+/**
+ * Post a PR review with a summary and inline comments.
+ * Uses event COMMENT, so it never blocks merging on its own.
+ */
+export async function postPRReview(
+    prNumber: number,
+    review: { body: string; comments: ReviewCommentInput[]; commitId?: string },
+    repoPath = process.cwd(),
+): Promise<void> {
+    await assertGhCli();
+    const payload = {
+        event: 'COMMENT',
+        body: review.body,
+        ...(review.commitId ? { commit_id: review.commitId } : {}),
+        comments: review.comments.map(c => ({ path: c.path, line: c.line, side: 'RIGHT', body: c.body })),
+    };
+    await execa('gh', ['api', '-X', 'POST', `repos/{owner}/{repo}/pulls/${prNumber}/reviews`, '--input', '-'], {
+        cwd: repoPath,
+        input: JSON.stringify(payload),
+    });
+}
+
 /**
  * Build a task string from an issue context.
  */
