@@ -1,5 +1,5 @@
 /**
- * Workflow runner — prepares a run and hands it to the executor.
+ * Workflow runner: prepares a run and hands it to the executor.
  *
  * This module:
  * 1. Loads config, the workflow definition, context documents, and MCP servers
@@ -40,6 +40,12 @@ export interface RunOptions {
     task: string;
     /** Workflow to run (default: "standard"). */
     workflow?: string;
+    /** A workflow definition to run instead of looking one up by name. */
+    definition?: WorkflowDefinition;
+    /** Extra reference documents for every agent (e.g. the diff under review). */
+    contextDocuments?: ContextDocument[];
+    /** Seed values for the run context (e.g. files changed by the diff under review). */
+    initialContext?: Partial<Pick<WorkflowContext, 'generatedFiles' | 'changeSummary'>>;
     /** Skip all human approval gates (autonomous mode). */
     auto?: boolean;
     /** Workflow mode override (fast, balanced, strict). Overrides config. */
@@ -91,7 +97,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     const auto = options.auto === true || options.headless === true;
     const config = loadConfig(projectRoot);
     const isolationMode = options.isolation ?? config.workflow.isolation;
-    const { definition: workflow } = getWorkflow(projectRoot, options.workflow ?? DEFAULT_WORKFLOW);
+    const workflow = options.definition ?? getWorkflow(projectRoot, options.workflow ?? DEFAULT_WORKFLOW).definition;
 
     // Merge CLI approval gates into config
     if (options.approvalGates && options.approvalGates.length > 0) {
@@ -104,7 +110,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     }
 
     const maxIterations = workflow.maxIterations ?? config.workflow.maxIterations;
-    const contextDocs = loadContextDocuments(projectRoot, contextPaths);
+    const contextDocs = [...loadContextDocuments(projectRoot, contextPaths), ...(options.contextDocuments ?? [])];
     const sourceDocs = loadLegacySources(projectRoot, config);
 
     // Dry-run: show execution plan and exit
@@ -149,7 +155,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
     }
 
     return runLoop({
-        ctx: createWorkflowContext(task, workflow.name, firstStep(workflow).id, maxIterations),
+        ctx: { ...createWorkflowContext(task, workflow.name, firstStep(workflow).id, maxIterations), ...options.initialContext },
         workflow,
         projectRoot: effectiveRoot,
         sourceProjectRoot: projectRoot,
@@ -225,7 +231,7 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
             };
             logger.info(`Restored worktree: ${session.worktreePath} (branch: ${session.worktreeBranch})`);
         } else {
-            // Worktree was discarded — ask what to do (headless: recreate it)
+            // Worktree was discarded: ask what to do (headless: recreate it)
             const { action } = options.headless ? { action: 'recreate' } : await prompts({
                 type: 'select',
                 name: 'action',
@@ -501,7 +507,7 @@ function printDryRun(
 ): void {
     logger.header('AI Workflow — Dry Run');
     console.log(chalk.gray(`Task: ${task}`));
-    console.log(chalk.gray(`Workflow: ${workflow.name}${workflow.description ? ` — ${workflow.description}` : ''}`));
+    console.log(chalk.gray(`Workflow: ${workflow.name}${workflow.description ? `: ${workflow.description}` : ''}`));
     console.log(chalk.gray(`Mode: ${config.workflow.mode}`));
     console.log(chalk.gray(`Max iterations: ${maxIterations}`));
     console.log();
@@ -518,7 +524,7 @@ function printDryRun(
             step.next ? `next → ${step.next}` : undefined,
         ].filter(Boolean).join(' | ');
 
-        console.log(chalk.bold(`  ${i + 1}. ${step.id} — ${AGENT_ROLE_LABELS[step.agent]}`));
+        console.log(chalk.bold(`  ${i + 1}. ${step.id} (${AGENT_ROLE_LABELS[step.agent]})`));
         console.log(chalk.gray(`     Provider: ${agentConfig.provider} / ${agentConfig.model}`));
         if (step.description) console.log(chalk.gray(`     ${step.description}`));
         if (flags) console.log(chalk.gray(`     ${flags}`));
@@ -631,7 +637,7 @@ function printWorkflowSummary(ctx: WorkflowContext): void {
         console.log(chalk.bold('  Steps:'));
         for (const record of ctx.history) {
             const mark = record.outcome === 'passed' ? chalk.green('✓') : record.outcome === 'failed' ? chalk.yellow('↺') : chalk.red('✗');
-            const detail = record.detail ? chalk.gray(` — ${record.detail}`) : '';
+            const detail = record.detail ? chalk.gray(`: ${record.detail}`) : '';
             console.log(`    ${mark} ${record.step}${detail}`);
         }
     }
