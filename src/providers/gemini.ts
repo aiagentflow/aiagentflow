@@ -17,10 +17,11 @@ import type {
     ChatChunk,
     ModelInfo,
     TokenUsage,
+    ToolCall,
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
-import { normalizeStopReason, toPlainMessages } from './messages.js';
+import { normalizeStopReason } from './messages.js';
 
 /** Configuration required to create a Gemini provider. */
 export interface GeminiProviderConfig {
@@ -60,29 +61,9 @@ export class GeminiProvider implements LLMProvider {
      */
     async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
         const model = options?.model ?? DEFAULTS.model;
-        const { contents, systemInstruction } = this.prepareMessages(messages, options);
+        const body = this.buildBody(messages, options);
 
-        const body: Record<string, unknown> = { contents };
-
-        if (systemInstruction) {
-            body.system_instruction = systemInstruction;
-        }
-
-        const generationConfig: Record<string, unknown> = {};
-        if (options?.maxTokens !== undefined) {
-            generationConfig.maxOutputTokens = options.maxTokens;
-        }
-        if (options?.temperature !== undefined) {
-            generationConfig.temperature = options.temperature;
-        }
-        if (options?.stopSequences?.length) {
-            generationConfig.stopSequences = options.stopSequences;
-        }
-        if (Object.keys(generationConfig).length > 0) {
-            body.generationConfig = generationConfig;
-        }
-
-        logger.debug(`Gemini chat request: model=${model}, contents=${contents.length}`);
+        logger.debug(`Gemini chat request: model=${model}, contents=${(body.contents as unknown[]).length}`);
 
         const response = await this.request(
             `/v1beta/models/${model}:generateContent`,
@@ -92,8 +73,9 @@ export class GeminiProvider implements LLMProvider {
         const candidates = response.candidates as Array<Record<string, unknown>> | undefined;
         const firstCandidate = candidates?.[0];
         const content = firstCandidate?.content as Record<string, unknown> | undefined;
-        const parts = content?.parts as Array<{ text?: string }> | undefined;
-        const text = parts?.map((p) => p.text ?? '').join('') ?? '';
+        const parts = (content?.parts as GeminiPart[] | undefined) ?? [];
+        const text = parts.map((p) => p.text ?? '').join('');
+        const toolCalls = extractToolCalls(parts);
         const finishReason = (firstCandidate?.finishReason as string) ?? 'unknown';
         const usage = this.extractUsage(response);
 
@@ -102,8 +84,9 @@ export class GeminiProvider implements LLMProvider {
             model,
             usage,
             finishReason,
-            stopReason: normalizeStopReason(finishReason),
-            toolCalls: [],
+            // Gemini reports STOP even when it requests functions
+            stopReason: toolCalls.length > 0 ? 'tool_use' : normalizeStopReason(finishReason),
+            toolCalls,
         };
     }
 
@@ -112,24 +95,7 @@ export class GeminiProvider implements LLMProvider {
      */
     async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<ChatChunk> {
         const model = options?.model ?? DEFAULTS.model;
-        const { contents, systemInstruction } = this.prepareMessages(messages, options);
-
-        const body: Record<string, unknown> = { contents };
-
-        if (systemInstruction) {
-            body.system_instruction = systemInstruction;
-        }
-
-        const generationConfig: Record<string, unknown> = {};
-        if (options?.maxTokens !== undefined) {
-            generationConfig.maxOutputTokens = options.maxTokens;
-        }
-        if (options?.temperature !== undefined) {
-            generationConfig.temperature = options.temperature;
-        }
-        if (Object.keys(generationConfig).length > 0) {
-            body.generationConfig = generationConfig;
-        }
+        const body = this.buildBody(messages, options);
 
         const url = `${this.baseUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
 
@@ -146,6 +112,8 @@ export class GeminiProvider implements LLMProvider {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let sawToolCall = false;
+        let callIndex = 0;
 
         try {
             while (true) {
@@ -161,27 +129,32 @@ export class GeminiProvider implements LLMProvider {
                     const data = line.slice(6).trim();
                     if (!data) continue;
 
+                    let event: { candidates?: Array<{ content?: { parts?: GeminiPart[] }; finishReason?: string }> };
                     try {
-                        const event = JSON.parse(data);
-                        const candidates = event.candidates as Array<Record<string, unknown>> | undefined;
-                        const parts = (candidates?.[0]?.content as Record<string, unknown>)?.parts as Array<{ text?: string }> | undefined;
-                        const text = parts?.map((p) => p.text ?? '').join('') ?? '';
-
-                        if (text) {
-                            yield { content: text, done: false };
-                        }
-
-                        const finishReason = candidates?.[0]?.finishReason as string | undefined;
-                        if (finishReason && finishReason !== 'STOP') {
-                            yield { content: '', done: true };
-                            return;
-                        }
-                        if (finishReason === 'STOP') {
-                            yield { content: '', done: true };
-                            return;
-                        }
+                        event = JSON.parse(data);
                     } catch {
-                        // Skip unparseable lines
+                        continue; // Skip unparseable lines
+                    }
+
+                    const candidate = event.candidates?.[0];
+                    const parts = candidate?.content?.parts ?? [];
+                    const text = parts.map((p) => p.text ?? '').join('');
+                    if (text) {
+                        yield { content: text, done: false };
+                    }
+
+                    // Function calls arrive whole, never split across chunks
+                    const toolCalls = extractToolCalls(parts, callIndex);
+                    if (toolCalls.length > 0) {
+                        callIndex += toolCalls.length;
+                        sawToolCall = true;
+                        yield { content: '', done: false, toolCalls };
+                    }
+
+                    if (candidate?.finishReason) {
+                        const stopReason = sawToolCall ? 'tool_use' : normalizeStopReason(candidate.finishReason);
+                        yield { content: '', done: true, stopReason };
+                        return;
                     }
                 }
             }
@@ -247,43 +220,28 @@ export class GeminiProvider implements LLMProvider {
         return response.json() as Promise<Record<string, unknown>>;
     }
 
-    /**
-     * Prepare messages for the Gemini API.
-     * Gemini uses `user` and `model` roles (not `assistant`).
-     * System messages are extracted to a separate `system_instruction` field.
-     */
-    private prepareMessages(
-        messages: ChatMessage[],
-        options?: ChatOptions,
-    ): {
-        contents: Array<{ role: string; parts: Array<{ text: string }> }>;
-        systemInstruction?: { parts: Array<{ text: string }> };
-    } {
-        const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
-        const systemParts: string[] = [];
+    private buildBody(messages: ChatMessage[], options?: ChatOptions): Record<string, unknown> {
+        const { contents, systemInstruction } = prepareContents(messages, options?.systemPrompt);
+        const body: Record<string, unknown> = { contents };
 
-        if (options?.systemPrompt) {
-            systemParts.push(options.systemPrompt);
+        if (systemInstruction) body.system_instruction = systemInstruction;
+        if (options?.tools?.length) {
+            body.tools = [{
+                functionDeclarations: options.tools.map(t => ({
+                    name: t.name,
+                    description: t.description,
+                    parameters: toGeminiSchema(t.inputSchema),
+                })),
+            }];
         }
 
-        for (const msg of toPlainMessages(messages)) {
-            if (msg.role === 'system') {
-                systemParts.push(msg.content);
-                continue;
-            }
+        const generationConfig: Record<string, unknown> = {};
+        if (options?.maxTokens !== undefined) generationConfig.maxOutputTokens = options.maxTokens;
+        if (options?.temperature !== undefined) generationConfig.temperature = options.temperature;
+        if (options?.stopSequences?.length) generationConfig.stopSequences = options.stopSequences;
+        if (Object.keys(generationConfig).length > 0) body.generationConfig = generationConfig;
 
-            const role = msg.role === 'assistant' ? 'model' : 'user';
-            contents.push({
-                role,
-                parts: [{ text: msg.content }],
-            });
-        }
-
-        const systemInstruction = systemParts.length > 0
-            ? { parts: [{ text: systemParts.join('\n\n') }] }
-            : undefined;
-
-        return { contents, systemInstruction };
+        return body;
     }
 
     private extractUsage(response: Record<string, unknown>): TokenUsage {
@@ -294,4 +252,98 @@ export class GeminiProvider implements LLMProvider {
             totalTokens: usage?.totalTokenCount ?? 0,
         };
     }
+}
+
+/** A content part in the Gemini wire format. */
+interface GeminiPart {
+    text?: string;
+    functionCall?: { id?: string; name: string; args?: Record<string, unknown> };
+    functionResponse?: { id?: string; name: string; response: Record<string, unknown> };
+    thoughtSignature?: string;
+}
+
+/**
+ * Convert messages to Gemini `contents`.
+ * Gemini uses `user` and `model` roles; system text goes to `system_instruction`.
+ * Function responses are matched to their call by name, so tool results look up
+ * the name of the call they answer.
+ */
+export function prepareContents(
+    messages: readonly ChatMessage[],
+    systemPrompt?: string,
+): { contents: Array<{ role: 'user' | 'model'; parts: GeminiPart[] }>; systemInstruction?: { parts: Array<{ text: string }> } } {
+    const contents: Array<{ role: 'user' | 'model'; parts: GeminiPart[] }> = [];
+    const systemParts: string[] = systemPrompt ? [systemPrompt] : [];
+    const callsById = new Map<string, ToolCall>();
+
+    for (const msg of messages) {
+        switch (msg.role) {
+            case 'system':
+                systemParts.push(msg.content);
+                break;
+            case 'user':
+                contents.push({ role: 'user', parts: [{ text: msg.content }] });
+                break;
+            case 'assistant': {
+                const parts: GeminiPart[] = msg.content ? [{ text: msg.content }] : [];
+                for (const call of msg.toolCalls ?? []) {
+                    callsById.set(call.callId, call);
+                    const signature = call.metadata?.thoughtSignature;
+                    parts.push({
+                        functionCall: { name: call.name, args: call.input },
+                        ...(typeof signature === 'string' ? { thoughtSignature: signature } : {}),
+                    });
+                }
+                contents.push({ role: 'model', parts });
+                break;
+            }
+            case 'tool':
+                contents.push({
+                    role: 'user',
+                    parts: msg.results.map(r => ({
+                        functionResponse: {
+                            name: callsById.get(r.callId)?.name ?? r.callId,
+                            response: r.isError ? { error: r.content } : { content: r.content },
+                        },
+                    })),
+                });
+                break;
+        }
+    }
+
+    const systemInstruction = systemParts.length > 0 ? { parts: [{ text: systemParts.join('\n\n') }] } : undefined;
+    return { contents, systemInstruction };
+}
+
+/** Pull function calls out of response parts. Gemini may omit ids, so generate stable ones. */
+function extractToolCalls(parts: readonly GeminiPart[], startIndex = 0): ToolCall[] {
+    const calls: ToolCall[] = [];
+    for (const part of parts) {
+        if (!part.functionCall) continue;
+        calls.push({
+            callId: part.functionCall.id ?? `gemini_call_${startIndex + calls.length}`,
+            name: part.functionCall.name,
+            input: part.functionCall.args ?? {},
+            ...(part.thoughtSignature ? { metadata: { thoughtSignature: part.thoughtSignature } } : {}),
+        });
+    }
+    return calls;
+}
+
+/** JSON Schema keywords Gemini's OpenAPI-subset schema rejects. */
+const UNSUPPORTED_SCHEMA_KEYS = new Set(['$schema', '$id', 'additionalProperties', 'default', 'examples']);
+
+/** Strip JSON Schema keywords that Gemini function declarations do not accept. */
+export function toGeminiSchema(schema: unknown): unknown {
+    if (Array.isArray(schema)) return schema.map(toGeminiSchema);
+    if (!schema || typeof schema !== 'object') return schema;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(schema)) {
+        if (UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+        // `properties` maps names to schemas; keep the names, clean the schemas
+        out[key] = key === 'properties' && value && typeof value === 'object'
+            ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toGeminiSchema(v)]))
+            : toGeminiSchema(value);
+    }
+    return out;
 }
