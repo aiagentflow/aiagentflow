@@ -19,6 +19,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -27,4 +29,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
-      - run: npm publish --access public --provenance
+      - name: Publish
+        run: |
+          # Prerelease versions (e.g. 2.0.0-beta.1) go to the "next" dist-tag so
+          # "npm i @aiagentflow/cli" keeps installing the latest stable release.
+          VERSION=$(node -p "require('./package.json').version")
+          TAG=latest
+          case "$VERSION" in *-*) TAG=next ;; esac
+          npm publish --access public --provenance --tag "$TAG"
