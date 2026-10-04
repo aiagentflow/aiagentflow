@@ -33,7 +33,7 @@ describe('agentRoleConfigSchema', () => {
         expect(result.success).toBe(true);
         if (result.success) {
             expect(result.data.temperature).toBe(0.7);
-            expect(result.data.maxTokens).toBe(4096);
+            expect(result.data.maxTokens).toBe(16000);
         }
     });
 
