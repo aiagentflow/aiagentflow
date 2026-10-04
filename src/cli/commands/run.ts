@@ -7,9 +7,10 @@
  * Used by: cli/index.ts
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { readFileSync, existsSync } from 'node:fs';
 import { configExists } from '../../core/config/manager.js';
+import { enableJsonOutput, OUTPUT_FORMATS, type OutputFormat } from '../utils/json-output.js';
 import { runWorkflow } from '../../core/workflow/runner.js';
 import { runTaskQueue, parseTasks } from '../../core/workflow/task-queue.js';
 import { fetchPR, fetchIssue, buildPRTask, buildIssueTask, openPR } from '../../integrations/github.js';
@@ -19,6 +20,7 @@ export const runCommand = new Command('run')
     .description('Run an AI workflow task')
     .argument('<task>', 'Task description or path to a task list file (.txt)')
     .option('-w, --workflow <name>', 'Workflow to run: standard (default), fast, review, security-audit, or a project workflow')
+    .addOption(new Option('--output <format>', 'text (default) or json: NDJSON run events on stdout, human output on stderr').choices([...OUTPUT_FORMATS]).default('text'))
     .option('--auto', 'Autonomous mode — skip all human approval gates')
     .option('--batch', 'Treat the argument as a task list file (one task per line)')
     .option('--mode <mode>', 'Deprecated: fast, balanced, or strict preset (use --workflow and config instead)')
@@ -36,13 +38,15 @@ export const runCommand = new Command('run')
     .option('--no-summary', 'Suppress the token/cost summary at the end of the run')
     .option('--pr <number>', 'Fetch a GitHub PR and address its review comments', parseInt)
     .option('--issue <number>', 'Fetch a GitHub issue and implement it', parseInt)
-    .action(async (task: string, options: { workflow?: string; auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean; dryRun?: boolean; isolate?: boolean; reviewPlan?: boolean; approvalGates?: string[]; parallel?: number; maxTokens?: number; maxCost?: number; summary: boolean; pr?: number; issue?: number }) => {
+    .action(async (task: string, options: { workflow?: string; output: OutputFormat; auto?: boolean; batch?: boolean; mode?: string; stopOnFailure?: boolean; context?: string[]; stream: boolean; dryRun?: boolean; isolate?: boolean; reviewPlan?: boolean; approvalGates?: string[]; parallel?: number; maxTokens?: number; maxCost?: number; summary: boolean; pr?: number; issue?: number }) => {
         const projectRoot = process.cwd();
 
         if (!configExists(projectRoot)) {
             logger.error('No configuration found. Run "aiagentflow init" first.');
             process.exit(1);
         }
+
+        const events = options.output === 'json' ? enableJsonOutput() : undefined;
 
         if (options.mode) {
             logger.warn('--mode is deprecated and will be removed in v3. Use --workflow to pick the pipeline and set iterations/approval in config.');
@@ -77,6 +81,7 @@ export const runCommand = new Command('run')
                     projectRoot,
                     tasks,
                     workflow: options.workflow,
+                    events,
                     auto: options.auto,
                     mode: options.mode,
                     stopOnFailure: options.stopOnFailure,
@@ -88,7 +93,8 @@ export const runCommand = new Command('run')
                 });
 
                 const failed = results.filter(t => t.status === 'failed').length;
-                if (failed > 0) process.exit(1);
+                // exitCode instead of exit() so piped NDJSON output is fully flushed
+                if (failed > 0) process.exitCode = 1;
                 return;
             }
 
@@ -134,6 +140,7 @@ export const runCommand = new Command('run')
                 projectRoot,
                 task: resolvedTask,
                 workflow: options.workflow,
+                events,
                 auto: options.auto,
                 mode: options.mode,
                 contextPaths: options.context,
@@ -145,7 +152,8 @@ export const runCommand = new Command('run')
             });
 
             if (result.status === 'failed') {
-                process.exit(1);
+                process.exitCode = 1;
+                return;
             }
 
             // Auto-open a PR for --issue runs that passed
