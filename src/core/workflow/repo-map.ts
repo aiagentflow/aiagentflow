@@ -1,5 +1,5 @@
 /**
- * Repo map — a compact, token-budgeted overview of the project.
+ * Repo map: a compact, token-budgeted overview of the project.
  *
  * Lists project files grouped by directory, with the top-level/exported
  * symbols of each source file. Agents get this instead of full file

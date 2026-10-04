@@ -2,8 +2,8 @@
  * TUI root application — tab-based layout for the aiagentflow dashboard.
  *
  * Sections:
- *   1. Runs     — live list of active worktree runs (auto-refreshes)
- *   2. Activity — live event feed of the most recent run
+ *   1. Runs: live list of active worktree runs (auto-refreshes)
+ *   2. Activity: live event feed of the most recent run
  *
  * Dependency direction: App.tsx → ink, ui/screens/*
  * Used by: cli/commands/ui.ts

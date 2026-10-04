@@ -1,5 +1,5 @@
 /**
- * Workflow loader — finds built-in and project workflow definitions.
+ * Workflow loader: finds built-in and project workflow definitions.
  *
  * Project workflows live in `.aiagentflow/workflows/<name>.yml` (or .yaml).
  * A project file named like a built-in overrides it.

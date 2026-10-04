@@ -1,5 +1,5 @@
 /**
- * Workflow run context — the state of one task moving through a workflow.
+ * Workflow run context: the state of one task moving through a workflow.
  *
  * The workflow definition (see definition.ts) decides which step runs next;
  * this module holds what a run has accumulated so far and the helpers to

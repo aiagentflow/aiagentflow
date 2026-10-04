@@ -1,5 +1,5 @@
 /**
- * Workflow definitions — pipelines described as data instead of code.
+ * Workflow definitions: pipelines described as data instead of code.
  *
  * A workflow is an ordered list of steps. Each step runs one agent, then
  * optionally runs checks (format, lint, test) and a verdict gate. When a

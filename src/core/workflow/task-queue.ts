@@ -107,7 +107,7 @@ async function runSequential(queue: QueuedTask[], params: RunnerParams, stopOnFa
 
         if (params.budgetTracker.exceeded) {
             markRemaining(queue, i, 'skipped');
-            logger.warn(`${params.budgetTracker.exceededReason} — remaining tasks skipped.`);
+            logger.warn(`${params.budgetTracker.exceededReason}; remaining tasks skipped.`);
             break;
         }
 

@@ -1,5 +1,5 @@
 /**
- * The run_command tool — lets agents run tests, linters, and builds.
+ * The run_command tool: lets agents run tests, linters, and builds.
  *
  * Every command is checked against the CommandPolicy first. Commands that
  * need a decision are passed to `confirm`; without one (non-interactive

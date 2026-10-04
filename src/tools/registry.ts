@@ -1,5 +1,5 @@
 /**
- * Tool registry — the single place agents look up and execute tools.
+ * Tool registry: the single place agents look up and execute tools.
  *
  * Every tool source (MCP servers, the memory `remember` tool, built-in repo
  * tools) contributes `Tool` objects. The agent runtime only talks to the

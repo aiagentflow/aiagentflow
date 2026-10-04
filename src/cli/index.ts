@@ -25,6 +25,7 @@ import { pluginCommand } from './commands/plugin.js';
 import { uiCommand } from './commands/ui.js';
 import { memoryCommand } from './commands/memory.js';
 import { workflowCommand } from './commands/workflow.js';
+import { reviewCommand } from './commands/review.js';
 
 const program = new Command();
 
@@ -51,5 +52,6 @@ program.addCommand(pluginCommand);
 program.addCommand(uiCommand);
 program.addCommand(memoryCommand);
 program.addCommand(workflowCommand);
+program.addCommand(reviewCommand);
 
 program.parse();

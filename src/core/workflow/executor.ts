@@ -1,5 +1,5 @@
 /**
- * Workflow executor — runs a workflow definition step by step.
+ * Workflow executor: runs a workflow definition step by step.
  *
  * For each step: run the step's agent, apply its output to the run context,
  * then run the step's checks and verdict gate. A failed check or gate routes
@@ -287,7 +287,7 @@ function applyOutput(ctx: WorkflowContext, step: WorkflowStep, output: AgentOutp
 
             if (step.gate === 'verdict' && !isPositive(verdict)) {
                 const failure = `${AGENT_ROLE_LABELS[step.agent]} did not pass the change:\n\n${content}`;
-                if (step.agent === 'security') logger.warn('Security review found issues — routing to the fixer.');
+                if (step.agent === 'security') logger.warn('Security review found issues; routing to the fixer.');
                 return { ctx: { ...next, lastFailure: failure }, failure };
             }
             return { ctx: next };
@@ -309,7 +309,7 @@ async function runChecks(ctx: WorkflowContext, step: WorkflowStep, p: ExecutorPa
             p.events?.emit({ type: 'check.finished', step: step.id, check: 'lint', passed: lint.passed });
             if (lint.passed) continue;
             if (isRepeatedFailure(lint.output, ctx.previousFailures)) {
-                logger.warn('Repeated lint failure — the fixer could not resolve these lint errors. Continuing.');
+                logger.warn('Repeated lint failure: the fixer could not resolve these lint errors. Continuing.');
                 continue;
             }
             const failure = `Lint errors:\n${lint.output}`;
@@ -325,8 +325,8 @@ async function runChecks(ctx: WorkflowContext, step: WorkflowStep, p: ExecutorPa
                 continue;
             }
             if (isRepeatedFailure(tests.output, ctx.previousFailures)) {
-                logger.warn('Repeated test failure detected — same errors after a fix attempt. Stopping.');
-                return { ctx, abort: 'Repeated test failure — the fixer could not resolve the issue', abortKind: 'checks' };
+                logger.warn('Repeated test failure: same errors after a fix attempt. Stopping.');
+                return { ctx, abort: 'Repeated test failure: the fixer could not resolve the issue', abortKind: 'checks' };
             }
             const failure = `Test failures:\n${tests.output}`;
             return { ctx: { ...ctx, previousFailures: [...ctx.previousFailures, tests.output], testFailures: tests.output, lastFailure: failure }, failure };
@@ -463,8 +463,8 @@ function firstLine(text: string): string {
  * Check if a check's failure output matches any previous failure.
  *
  * Uses two strategies:
- * 1. Error signature match — extracts error types/messages and compares
- * 2. Line-level similarity — if >50% of meaningful lines match, it's a repeat
+ * 1. Error signature match: extracts error types/messages and compares
+ * 2. Line-level similarity: if >50% of meaningful lines match, it's a repeat
  */
 export function isRepeatedFailure(current: string, previous: string[]): boolean {
     if (previous.length === 0) return false;
@@ -512,7 +512,7 @@ function extractErrorSignatures(output: string): string[] {
     return [...new Set(signatures)];
 }
 
-/** Normalize check output lines for comparison — trim, drop noise. */
+/** Normalize check output lines for comparison: trim, drop noise. */
 function normalizeLines(output: string): string[] {
     return output
         .split('\n')
