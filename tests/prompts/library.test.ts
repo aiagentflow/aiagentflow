@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadAgentPrompt } from '../../src/prompts/library.js';
+import { loadAgentPrompt, V1_PROMPTS } from '../../src/prompts/library.js';
 import { logger } from '../../src/utils/logger.js';
 
 let root: string;
@@ -27,7 +27,7 @@ describe('loadAgentPrompt', () => {
     it('returns the v1 FILE: prompt in legacy mode', () => {
         expect(loadAgentPrompt(root, 'fixer', { legacyFileBlocks: true })).toContain('FILE: path/to/file.ext');
         // Roles without a legacy variant are unaffected
-        expect(loadAgentPrompt(root, 'reviewer', { legacyFileBlocks: true })).toContain('APPROVE or REQUEST_CHANGES');
+        expect(loadAgentPrompt(root, 'reviewer', { legacyFileBlocks: true })).toContain('submit_verdict');
     });
 
     it('upgrades an untouched v1 prompt file transparently', () => {
@@ -40,5 +40,13 @@ describe('loadAgentPrompt', () => {
         writeFileSync(join(promptsDir(), 'coder.md'), '# My coder\nAlways use FILE: blocks.');
         expect(loadAgentPrompt(root, 'coder')).toBe('# My coder\nAlways use FILE: blocks.');
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('v1 "FILE:" output'));
+    });
+
+    it('upgrades untouched v1 prompts for every role', () => {
+        for (const role of ['architect', 'reviewer', 'security', 'judge'] as const) {
+            writeFileSync(join(promptsDir(), `${role}.md`), V1_PROMPTS[role]);
+            expect(loadAgentPrompt(root, role)).not.toBe(V1_PROMPTS[role]);
+        }
+        expect(loadAgentPrompt(root, 'reviewer')).toContain('submit_verdict');
     });
 });
