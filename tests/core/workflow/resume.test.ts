@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TokenTracker, type TokenUsageEntry } from '../../../src/core/workflow/token-tracker.js';
 import { saveSession, loadSession, listSessions } from '../../../src/core/workflow/session.js';
-import { createWorkflowContext, isTerminal, transition } from '../../../src/core/workflow/engine.js';
+import { createWorkflowContext, isTerminal, failRun } from '../../../src/core/workflow/engine.js';
 
 describe('TokenTracker.restoreEntries', () => {
     it('restores saved entries into the tracker', () => {
@@ -61,7 +61,7 @@ describe('Session persistence for resume', () => {
     });
 
     it('saves and loads a session', () => {
-        const ctx = createWorkflowContext('test task', 5);
+        const ctx = createWorkflowContext('test task', 'standard', 'plan', 5);
         const sessionId = saveSession(tmpDir, ctx, [], 'test-session');
 
         expect(sessionId).toBe('test-session');
@@ -69,7 +69,7 @@ describe('Session persistence for resume', () => {
         const loaded = loadSession(tmpDir, 'test-session');
         expect(loaded).not.toBeNull();
         expect(loaded!.context.task).toBe('test task');
-        expect(loaded!.context.state).toBe('idle');
+        expect(loaded!.context).toMatchObject({ status: 'running', step: 'plan', workflow: 'standard' });
     });
 
     it('returns null for non-existent session', () => {
@@ -78,8 +78,8 @@ describe('Session persistence for resume', () => {
     });
 
     it('lists sessions sorted by updatedAt', () => {
-        const ctx1 = createWorkflowContext('task 1', 5);
-        const ctx2 = createWorkflowContext('task 2', 5);
+        const ctx1 = createWorkflowContext('task 1', 'standard', 'plan', 5);
+        const ctx2 = createWorkflowContext('task 2', 'standard', 'plan', 5);
 
         // Write session files with explicit timestamps to avoid race conditions
         const sessionsDir = join(tmpDir, '.aiagentflow', 'sessions');
@@ -96,10 +96,10 @@ describe('Session persistence for resume', () => {
     });
 
     it('identifies terminal vs non-terminal sessions', () => {
-        const ctx = createWorkflowContext('test', 5);
+        const ctx = createWorkflowContext('test', 'standard', 'plan', 5);
         saveSession(tmpDir, ctx, [], 'active-session');
 
-        const failedCtx = transition(ctx, { type: 'ABORT', payload: { reason: 'error' } });
+        const failedCtx = failRun(ctx, 'error');
         saveSession(tmpDir, failedCtx, [], 'failed-session');
 
         const sessions = listSessions(tmpDir);
@@ -113,7 +113,7 @@ describe('Session persistence for resume', () => {
     });
 
     it('preserves token usage across save/load', () => {
-        const ctx = createWorkflowContext('test', 5);
+        const ctx = createWorkflowContext('test', 'standard', 'plan', 5);
         const entries: TokenUsageEntry[] = [
             { role: 'architect', model: 'gpt-4', promptTokens: 100, completionTokens: 200, totalTokens: 300, timestamp: Date.now() },
         ];
@@ -123,5 +123,22 @@ describe('Session persistence for resume', () => {
 
         expect(loaded!.tokenUsage).toHaveLength(1);
         expect(loaded!.tokenUsage[0]!.totalTokens).toBe(300);
+    });
+
+    it('converts v1 sessions when loading them', () => {
+        const sessionsDir = join(tmpDir, '.aiagentflow', 'sessions');
+        writeFileSync(join(sessionsDir, 'v1.json'), JSON.stringify({
+            id: 'v1', createdAt: 1, updatedAt: 1, tokenUsage: [],
+            context: {
+                task: 'old', state: 'tests_failed', iteration: 1, maxIterations: 5, generatedFiles: ['a.ts'], testFiles: [], previousFailures: [],
+                history: [{ from: 'idle', to: 'spec_created', event: 'SPEC_READY', timestamp: 5 }],
+            },
+        }));
+
+        const ctx = loadSession(tmpDir, 'v1')!.context;
+        expect(ctx).toMatchObject({ workflow: 'standard', status: 'running', step: 'fix', iteration: 1, generatedFiles: ['a.ts'] });
+        expect(ctx).not.toHaveProperty('state');
+        expect(ctx.history).toEqual([{ step: 'spec_created', outcome: 'passed', detail: 'SPEC_READY', timestamp: 5 }]);
+        expect(isTerminal(ctx)).toBe(false);
     });
 });
