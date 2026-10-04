@@ -167,7 +167,7 @@ describe('projectConfigSchema', () => {
 describe('appConfigSchema', () => {
     it('accepts a complete valid config', () => {
         const validConfig = {
-            version: 1,
+            version: 2,
             providers: {
                 ollama: { baseUrl: 'http://localhost:11434' },
             },
@@ -189,7 +189,7 @@ describe('appConfigSchema', () => {
 
     it('rejects wrong version number', () => {
         const result = appConfigSchema.safeParse({
-            version: 2,
+            version: 3,
             providers: {},
             agents: {
                 architect: { provider: 'ollama', model: 'test' },
