@@ -40,45 +40,60 @@ export interface ModelPricing {
     cacheWrite?: number;
 }
 
-/** Anthropic bills cache reads at 0.1x and cache writes at 1.25x the input price. */
-function anthropic(input: number, output: number): ModelPricing {
-    return { input, output, cacheRead: input * 0.1, cacheWrite: input * 1.25 };
+/** Claude: 5-minute cache writes bill at 1.25x input; cache reads are listed per model. */
+function claude(input: number, output: number, cacheRead = input * 0.1): ModelPricing {
+    return { input, output, cacheRead, cacheWrite: input * 1.25 };
 }
 
-/** Estimated cost per 1M tokens for known models. */
+/**
+ * USD per 1M tokens, standard tier, prompts up to 200K tokens.
+ *
+ * Bundled rather than fetched so cost estimates work offline (aiagentflow is
+ * local-first). Sources, checked October 2026: Anthropic and OpenAI pricing
+ * docs, ai.google.dev/gemini-api/docs/pricing. Refresh every release. Models
+ * not listed show no cost; OpenRouter ":free" models cost nothing.
+ */
 export const COST_PER_1M_TOKENS: Record<string, ModelPricing> = {
     // Anthropic
-    'claude-sonnet-4-20250514': anthropic(3.00, 15.00),
-    'claude-opus-4-7': anthropic(15.00, 75.00),
-    'claude-sonnet-4-6': anthropic(3.00, 15.00),
-    'claude-haiku-4-5-20251001': anthropic(0.80, 4.00),
-    'claude-3-5-haiku-20241022': anthropic(1.00, 5.00),
-    'claude-3-opus-20240229': anthropic(15.00, 75.00),
-    // OpenAI
-    'gpt-4o': { input: 2.50, output: 10.00 },
-    'gpt-4o-mini': { input: 0.15, output: 0.60 },
-    'o1': { input: 15.00, output: 60.00 },
-    'o1-mini': { input: 3.00, output: 12.00 },
-    // Google Gemini
-    'gemini-2.0-flash': { input: 0.10, output: 0.40 },
-    'gemini-2.0-flash-lite': { input: 0.075, output: 0.30 },
-    'gemini-1.5-pro': { input: 1.25, output: 5.00 },
-    // Groq (hosted — not billed per token like API)
+    'claude-fable-5-1': claude(10.00, 50.00, 0.25),
+    'claude-fable-5': claude(10.00, 50.00),
+    'claude-opus-5-5': claude(4.00, 20.00, 0.20),
+    'claude-opus-5': claude(5.00, 25.00),
+    'claude-opus-4-8': claude(5.00, 25.00),
+    'claude-opus-4-7': claude(5.00, 25.00),
+    'claude-opus-4-6': claude(5.00, 25.00),
+    'claude-sonnet-5-5': claude(2.00, 10.00, 0.20),
+    'claude-sonnet-5': claude(2.00, 10.00),
+    'claude-sonnet-4-6': claude(3.00, 15.00),
+    'claude-sonnet-4-20250514': claude(3.00, 15.00),
+    'claude-haiku-4-5': claude(1.00, 5.00),
+    'claude-haiku-4-5-20251001': claude(1.00, 5.00),
+    // OpenAI (cached input listed per model)
+    'gpt-6-astra': { input: 10.00, output: 50.00, cacheRead: 1.00 },
+    'gpt-6.1-sol': { input: 2.00, output: 10.00, cacheRead: 0.10 },
+    'gpt-6-sol': { input: 2.00, output: 10.00, cacheRead: 0.20 },
+    'gpt-6-luna': { input: 0.10, output: 0.50, cacheRead: 0.01 },
+    'gpt-5.6-sol': { input: 4.00, output: 20.00, cacheRead: 0.40 },
+    'gpt-5.6-luna': { input: 0.20, output: 1.20, cacheRead: 0.02 },
+    'gpt-5.4-mini': { input: 0.75, output: 4.50, cacheRead: 0.075 },
+    'gpt-5.4-nano': { input: 0.20, output: 1.25, cacheRead: 0.02 },
+    'gpt-5-mini': { input: 0.25, output: 2.00, cacheRead: 0.025 },
+    'gpt-5-nano': { input: 0.05, output: 0.40, cacheRead: 0.005 },
+    'gpt-4.1-mini': { input: 0.40, output: 1.60, cacheRead: 0.10 },
+    'gpt-4o-mini': { input: 0.15, output: 0.60, cacheRead: 0.075 },
+    // Google Gemini (context-cache reads listed per model)
+    'gemini-3.8-flash': { input: 0.75, output: 3.75, cacheRead: 0.075 },
+    'gemini-3.7-flash': { input: 0.75, output: 3.75, cacheRead: 0.075 },
+    'gemini-3.6-flash': { input: 0.75, output: 3.75, cacheRead: 0.075 },
+    'gemini-3.5-flash': { input: 1.50, output: 9.00, cacheRead: 0.15 },
+    'gemini-3.5-flash-lite': { input: 0.30, output: 2.50, cacheRead: 0.03 },
+    'gemini-2.5-pro': { input: 1.25, output: 10.00, cacheRead: 0.125 },
+    'gemini-2.5-flash': { input: 0.30, output: 2.50, cacheRead: 0.03 },
+    'gemini-2.5-flash-lite': { input: 0.10, output: 0.40, cacheRead: 0.01 },
+    // Groq (approximate; Groq bills per model on its console)
     'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 },
-    'mixtral-8x7b-32768': { input: 0.24, output: 0.24 },
-    // Ollama (local — free)
+    // Ollama runs locally: local models are free
     'llama3.2:latest': { input: 0, output: 0 },
-    'codellama:latest': { input: 0, output: 0 },
-    'deepseek-coder:latest': { input: 0, output: 0 },
-    'deepseek-r1:latest': { input: 0, output: 0 },
-    // OpenRouter — free tier models (":free" suffix)
-    'meta-llama/llama-3.1-8b-instruct:free': { input: 0, output: 0 },
-    'google/gemma-3-12b-it:free': { input: 0, output: 0 },
-    'mistralai/mistral-7b-instruct:free': { input: 0, output: 0 },
-    // OpenRouter — paid models (via proxy, pricing approximate)
-    'meta-llama/llama-3.1-70b-instruct': { input: 0.35, output: 0.40 },
-    'mistralai/mixtral-8x7b-instruct': { input: 0.24, output: 0.24 },
-    'deepseek/deepseek-r1': { input: 0.55, output: 2.19 },
 };
 
 /**
@@ -86,6 +101,7 @@ export const COST_PER_1M_TOKENS: Record<string, ModelPricing> = {
  * Cached input is priced at the cache rates; the rest at the input rate.
  */
 export function costOf(entry: Pick<TokenUsageEntry, 'model' | 'promptTokens' | 'completionTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>): number {
+    if (entry.model.endsWith(':free')) return 0;
     const pricing = COST_PER_1M_TOKENS[entry.model];
     if (!pricing) return 0;
     const cacheRead = entry.cacheReadTokens ?? 0;
