@@ -8,6 +8,7 @@
  * Used by: providers/registry.ts
  */
 
+import { PROVIDER_DEFAULT_MODELS } from './metadata.js';
 import { ProviderError } from '../core/errors.js';
 import { logger } from '../utils/logger.js';
 import { OpenAICompatibleProvider, withV1 } from './openai-compatible.js';
@@ -29,7 +30,7 @@ const COMPOUND_MODELS = new Set(['compound-beta', 'compound-beta-mini', 'groq/co
 /** Default Groq API settings. */
 const DEFAULTS = {
     baseUrl: 'https://api.groq.com/openai/v1',
-    model: 'llama-3.3-70b-versatile',
+    model: PROVIDER_DEFAULT_MODELS.groq,
 } as const;
 
 export class GroqProvider extends OpenAICompatibleProvider {

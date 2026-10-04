@@ -65,7 +65,7 @@ describe('OpenAICompatibleProvider.chat', () => {
 
         const body = sentBody(fetchMock);
         expect(body.tools).toEqual([{ type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object' } } }]);
-        expect(body.max_tokens).toBe(100);
+        expect(body.max_completion_tokens).toBe(100);
         expect(sentUrl(fetchMock)).toBe('https://api.openai.com/v1/chat/completions');
     });
 
@@ -158,5 +158,23 @@ describe('usage reporting', () => {
         const chunks: ChatChunk[] = [];
         for await (const c of new GroqProvider({ apiKey: 'k' }).stream([{ role: 'user', content: 'hi' }])) chunks.push(c);
         expect(chunks.at(-1)?.usage).toEqual({ promptTokens: 5, completionTokens: 1, totalTokens: 6 });
+    });
+});
+
+describe('OpenAI reasoning models', () => {
+    const ok = () => jsonResponse({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] });
+
+    it('omits temperature for reasoning models and keeps it for classic ones', async () => {
+        for (const [model, sendsTemperature] of [['gpt-5-mini', false], ['o3-mini', false], ['gpt-4.1-mini', true]] as const) {
+            const fetchMock = stubFetch(ok());
+            await new OpenAIProvider({ apiKey: 'k' }).chat([{ role: 'user', content: 'hi' }], { model, temperature: 0.3 });
+            expect('temperature' in sentBody(fetchMock)).toBe(sendsTemperature);
+        }
+    });
+
+    it('defaults to the model in provider metadata', async () => {
+        const fetchMock = stubFetch(ok());
+        await new OpenAIProvider({ apiKey: 'k' }).chat([{ role: 'user', content: 'hi' }]);
+        expect(sentBody(fetchMock).model).toBe('gpt-5-mini');
     });
 });

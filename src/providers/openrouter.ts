@@ -5,13 +5,14 @@
  * hundreds of models (including many free-tier ones). Useful for testing
  * without hitting per-provider rate limits.
  *
- * Free models: append ":free" to the model ID, e.g. "meta-llama/llama-3.1-8b-instruct:free"
+ * Free models: append ":free" to the model ID, e.g. "qwen/qwen3.8-27b:free" (the free list changes often)
  * Full model list: https://openrouter.ai/models
  *
  * Dependency direction: openrouter.ts → openai-compatible.ts, core/errors.ts
  * Used by: providers/registry.ts
  */
 
+import { PROVIDER_DEFAULT_MODELS } from './metadata.js';
 import { ProviderError } from '../core/errors.js';
 import { OpenAICompatibleProvider } from './openai-compatible.js';
 import { PROVIDER_TIMEOUT_MS } from './provider-errors.js';
@@ -28,7 +29,7 @@ export interface OpenRouterProviderConfig {
 /** Default OpenRouter API settings. */
 const DEFAULTS = {
     baseUrl: 'https://openrouter.ai/api/v1',
-    model: 'meta-llama/llama-3.1-8b-instruct:free',
+    model: PROVIDER_DEFAULT_MODELS.openrouter,
     siteUrl: 'https://github.com/aiagentflow/aiagentflow',
     siteName: 'aiagentflow',
 } as const;

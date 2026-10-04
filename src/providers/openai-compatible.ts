@@ -42,6 +42,8 @@ export interface OpenAICompatibleSettings {
     readonly timeoutMs: number;
     /** Body field for the output token limit (newer APIs use max_completion_tokens). */
     readonly maxTokensField?: 'max_tokens' | 'max_completion_tokens';
+    /** Whether `model` accepts a temperature (reasoning models reject it). Default: always. */
+    readonly acceptsTemperature?: (model: string) => boolean;
 }
 
 /** OpenAI wire format for a message. */
@@ -247,7 +249,9 @@ export abstract class OpenAICompatibleProvider implements LLMProvider {
     private buildBody(messages: ChatMessage[], options: ChatOptions | undefined, model: string): Record<string, unknown> {
         const body: Record<string, unknown> = { model, messages: toApiMessages(messages, options?.systemPrompt) };
         if (options?.maxTokens !== undefined) body[this.settings.maxTokensField ?? 'max_tokens'] = options.maxTokens;
-        if (options?.temperature !== undefined) body.temperature = options.temperature;
+        if (options?.temperature !== undefined && (this.settings.acceptsTemperature?.(model) ?? true)) {
+            body.temperature = options.temperature;
+        }
         if (options?.stopSequences?.length) body.stop = options.stopSequences;
         if (options?.tools?.length) body.tools = options.tools.map(serializeTool);
         return body;

@@ -8,6 +8,7 @@
  * Used by: providers/registry.ts
  */
 
+import { PROVIDER_DEFAULT_MODELS } from './metadata.js';
 import { ProviderError } from '../core/errors.js';
 import type {
     LLMProvider,
@@ -32,7 +33,7 @@ export interface GeminiProviderConfig {
 /** Default Gemini API settings. */
 const DEFAULTS = {
     baseUrl: 'https://generativelanguage.googleapis.com',
-    model: 'gemini-2.0-flash',
+    model: PROVIDER_DEFAULT_MODELS.gemini,
     maxTokens: 4096,
 } as const;
 

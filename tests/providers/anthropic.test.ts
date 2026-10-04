@@ -112,4 +112,20 @@ describe('AnthropicProvider tool calling', () => {
         for await (const c of provider.stream([{ role: 'user', content: 'hi' }])) chunks.push(c);
         expect(chunks.at(-1)?.usage).toEqual({ promptTokens: 100, completionTokens: 15, totalTokens: 115, cacheReadTokens: 60 });
     });
+
+    it('omits temperature for current models that reject sampling parameters', async () => {
+        for (const [model, sends] of [['claude-opus-5-5', false], ['claude-sonnet-5-5', false], ['claude-opus-4-7', false], ['claude-sonnet-4-6', true], ['claude-haiku-4-5', true]] as const) {
+            const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ stop_reason: 'end_turn', content: [], usage: {} }));
+            vi.stubGlobal('fetch', fetchMock);
+            await provider.chat([{ role: 'user', content: 'hi' }], { model, temperature: 0.4 });
+            expect('temperature' in JSON.parse(fetchMock.mock.calls[0]![1].body as string)).toBe(sends);
+        }
+    });
+
+    it('lists models from the Models API', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: [{ id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', max_input_tokens: 1_000_000 }] }));
+        vi.stubGlobal('fetch', fetchMock);
+        expect(await provider.listModels()).toEqual([{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5', provider: 'anthropic', contextWindow: 1_000_000 }]);
+        expect(fetchMock.mock.calls[0]![0]).toContain('/v1/models');
+    });
 });

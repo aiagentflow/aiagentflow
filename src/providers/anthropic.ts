@@ -8,6 +8,7 @@
  * Used by: providers/registry.ts
  */
 
+import { PROVIDER_DEFAULT_MODELS } from './metadata.js';
 import { ProviderError } from '../core/errors.js';
 import type {
     LLMProvider,
@@ -36,7 +37,7 @@ export interface AnthropicProviderConfig {
 const DEFAULTS = {
     baseUrl: 'https://api.anthropic.com',
     apiVersion: '2023-06-01',
-    model: 'claude-sonnet-4-20250514',
+    model: PROVIDER_DEFAULT_MODELS.anthropic,
     maxTokens: 4096,
 } as const;
 
@@ -172,7 +173,7 @@ export class AnthropicProvider implements LLMProvider {
             messages: apiMessages,
         };
         if (systemPrompt) body.system = systemPrompt;
-        if (options?.temperature !== undefined) body.temperature = options.temperature;
+        if (options?.temperature !== undefined && acceptsSamplingParams(model)) body.temperature = options.temperature;
         if (options?.stopSequences?.length) body.stop_sequences = options.stopSequences;
         if (options?.tools?.length) body.tools = this.serializeTools(options.tools);
         return body;
@@ -187,35 +188,30 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     /**
-     * List available models (Anthropic doesn't have a models endpoint,
-     * so we return a curated list of known models).
+     * List the models this API key can use, from the Models API.
      */
     async listModels(): Promise<ModelInfo[]> {
-        return [
-            { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', contextWindow: 200000 },
-            { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', provider: 'anthropic', contextWindow: 200000 },
-            { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', provider: 'anthropic', contextWindow: 200000 },
-            { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic', contextWindow: 200000 },
-        ];
+        const response = await fetchWithRetry(
+            `${this.baseUrl}/v1/models?limit=1000`,
+            { method: 'GET', headers: this.getHeaders() },
+            { provider: 'anthropic', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
+        );
+        const body = await response.json() as { data?: Array<{ id: string; display_name?: string; max_input_tokens?: number }> };
+        return (body.data ?? []).map(m => ({
+            id: m.id,
+            name: m.display_name ?? m.id,
+            provider: 'anthropic' as const,
+            ...(m.max_input_tokens ? { contextWindow: m.max_input_tokens } : {}),
+        }));
     }
 
     /**
-     * Validate that the Anthropic API connection is working.
+     * Validate that the Anthropic API connection is working (key accepted).
      */
     async validateConnection(): Promise<boolean> {
         try {
-            const response = await fetch(`${this.baseUrl}/v1/messages`, {
-                method: 'POST',
-                headers: this.getHeaders(),
-                body: JSON.stringify({
-                    model: DEFAULTS.model,
-                    max_tokens: 1,
-                    messages: [{ role: 'user', content: 'ping' }],
-                }),
-            });
-
-            // A 200 or 400 (bad request but authenticated) means the key works
-            return response.status === 200 || response.status === 400;
+            const response = await fetch(`${this.baseUrl}/v1/models?limit=1`, { method: 'GET', headers: this.getHeaders() });
+            return response.ok;
         } catch {
             return false;
         }
@@ -361,4 +357,13 @@ function parseToolInput(json: string): Record<string, unknown> {
     } catch {
         return {};
     }
+}
+
+/**
+ * Whether a model accepts temperature/top_p/top_k. Current Claude models
+ * (Opus 4.7 and later, Sonnet 5 and later, Fable, Mythos) reject non-default
+ * sampling parameters with a 400; older models accept them.
+ */
+export function acceptsSamplingParams(model: string): boolean {
+    return /^claude-(3[-.]|haiku-|sonnet-4|opus-4-(?:[0-6](?!\d)|\d{8}))/.test(model);
 }
