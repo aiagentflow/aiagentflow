@@ -134,3 +134,29 @@ describe('provider settings', () => {
         expect(sentUrl(tagsFetch)).toBe('http://localhost:11434/api/tags');
     });
 });
+
+describe('usage reporting', () => {
+    it('requests stream usage and reads the final usage chunk, including cached tokens', async () => {
+        const fetchMock = stubFetch(sseResponse([
+            { choices: [{ delta: { content: 'Hi' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+            { choices: [], usage: { prompt_tokens: 120, completion_tokens: 8, total_tokens: 128, prompt_tokens_details: { cached_tokens: 100 } } },
+            '[DONE]',
+        ]));
+        const chunks: ChatChunk[] = [];
+        for await (const c of new OpenAIProvider({ apiKey: 'k' }).stream([{ role: 'user', content: 'hi' }])) chunks.push(c);
+
+        expect(sentBody(fetchMock).stream_options).toEqual({ include_usage: true });
+        expect(chunks.at(-1)?.usage).toEqual({ promptTokens: 120, completionTokens: 8, totalTokens: 128, cacheReadTokens: 100 });
+    });
+
+    it('reads Groq usage from x_groq', async () => {
+        stubFetch(sseResponse([
+            { choices: [{ delta: { content: 'x' }, finish_reason: 'stop' }], x_groq: { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } } },
+            '[DONE]',
+        ]));
+        const chunks: ChatChunk[] = [];
+        for await (const c of new GroqProvider({ apiKey: 'k' }).stream([{ role: 'user', content: 'hi' }])) chunks.push(c);
+        expect(chunks.at(-1)?.usage).toEqual({ promptTokens: 5, completionTokens: 1, totalTokens: 6 });
+    });
+});

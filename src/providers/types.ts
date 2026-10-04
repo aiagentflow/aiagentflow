@@ -120,13 +120,20 @@ export interface ChatChunk {
     readonly toolCalls?: readonly ToolCall[];
     /** Normalized stop reason, set on the final chunk when known. */
     readonly stopReason?: StopReason;
+    /** Token usage for the whole response, set on the final chunk when the provider reports it. */
+    readonly usage?: TokenUsage;
 }
 
 /** Token usage statistics for a request. */
 export interface TokenUsage {
+    /** All input tokens, including cached ones. */
     readonly promptTokens: number;
     readonly completionTokens: number;
     readonly totalTokens: number;
+    /** Input tokens served from the provider's prompt cache (subset of promptTokens). */
+    readonly cacheReadTokens?: number;
+    /** Input tokens written to the provider's prompt cache (subset of promptTokens). */
+    readonly cacheWriteTokens?: number;
 }
 
 /** Information about an available model. */

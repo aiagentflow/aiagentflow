@@ -106,6 +106,8 @@ export class AnthropicProvider implements LLMProvider {
         const decoder = new TextDecoder();
         let buffer = '';
         let stopReason: StopReason | undefined;
+        // Input usage arrives in message_start, output usage in message_delta
+        let usage: AnthropicUsage = {};
         // Tool-use blocks being streamed, keyed by content block index
         const pendingTools = new Map<number, { id: string; name: string; json: string }>();
 
@@ -122,7 +124,7 @@ export class AnthropicProvider implements LLMProvider {
                     if (!line.startsWith('data: ')) continue;
                     const data = line.slice(6).trim();
                     if (data === '[DONE]') {
-                        yield { content: '', done: true, stopReason };
+                        yield { content: '', done: true, stopReason, usage: toUsage(usage) };
                         return;
                     }
 
@@ -133,7 +135,9 @@ export class AnthropicProvider implements LLMProvider {
                         continue; // Skip unparseable lines
                     }
 
-                    if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+                    if (event.type === 'message_start' && event.message?.usage) {
+                        usage = { ...usage, ...event.message.usage };
+                    } else if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
                         pendingTools.set(event.index ?? -1, { id: event.content_block.id ?? '', name: event.content_block.name ?? '', json: '' });
                     } else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
                         const tool = pendingTools.get(event.index ?? -1);
@@ -144,10 +148,11 @@ export class AnthropicProvider implements LLMProvider {
                         const tool = pendingTools.get(event.index ?? -1)!;
                         pendingTools.delete(event.index ?? -1);
                         yield { content: '', done: false, toolCalls: [{ callId: tool.id, name: tool.name, input: parseToolInput(tool.json) }] };
-                    } else if (event.type === 'message_delta' && event.delta?.stop_reason) {
-                        stopReason = normalizeStopReason(event.delta.stop_reason);
+                    } else if (event.type === 'message_delta') {
+                        if (event.delta?.stop_reason) stopReason = normalizeStopReason(event.delta.stop_reason);
+                        if (event.usage) usage = { ...usage, ...event.usage };
                     } else if (event.type === 'message_stop') {
-                        yield { content: '', done: true, stopReason };
+                        yield { content: '', done: true, stopReason, usage: toUsage(usage) };
                         return;
                     }
                 }
@@ -156,7 +161,7 @@ export class AnthropicProvider implements LLMProvider {
             reader.releaseLock();
         }
 
-        yield { content: '', done: true, stopReason };
+        yield { content: '', done: true, stopReason, usage: toUsage(usage) };
     }
 
     private buildBody(messages: ChatMessage[], options: ChatOptions | undefined, model: string): Record<string, unknown> {
@@ -310,19 +315,39 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     private extractUsage(response: Record<string, unknown>): TokenUsage {
-        const usage = response.usage as Record<string, number> | undefined;
-        return {
-            promptTokens: usage?.input_tokens ?? 0,
-            completionTokens: usage?.output_tokens ?? 0,
-            totalTokens: (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0),
-        };
+        return toUsage(response.usage as AnthropicUsage | undefined);
     }
+}
+
+/** Usage counters as Anthropic reports them. input_tokens excludes cached tokens. */
+interface AnthropicUsage {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+}
+
+/** Normalize Anthropic usage so promptTokens counts all input, cached or not. */
+function toUsage(usage: AnthropicUsage | undefined): TokenUsage {
+    const cacheRead = usage?.cache_read_input_tokens ?? 0;
+    const cacheWrite = usage?.cache_creation_input_tokens ?? 0;
+    const promptTokens = (usage?.input_tokens ?? 0) + cacheRead + cacheWrite;
+    const completionTokens = usage?.output_tokens ?? 0;
+    return {
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
+        ...(cacheRead ? { cacheReadTokens: cacheRead } : {}),
+        ...(cacheWrite ? { cacheWriteTokens: cacheWrite } : {}),
+    };
 }
 
 /** The subset of Anthropic SSE event fields this adapter reads. */
 interface AnthropicStreamEvent {
     type: string;
     index?: number;
+    message?: { usage?: AnthropicUsage };
+    usage?: AnthropicUsage;
     content_block?: { type: string; id?: string; name?: string };
     delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string };
 }
