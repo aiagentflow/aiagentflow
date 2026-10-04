@@ -1,26 +1,17 @@
 /**
  * Ollama local model provider adapter.
  *
- * Connects to the Ollama HTTP API (default: http://localhost:11434).
- * Supports chat completion, streaming, model listing, and health checks.
+ * Uses Ollama's OpenAI-compatible endpoint (`/v1/chat/completions`), which
+ * supports streaming and function calling. Model listing and health checks
+ * use the native `/api/tags` endpoint.
  *
- * Dependency direction: ollama.ts → providers/types.ts, core/errors.ts
+ * Dependency direction: ollama.ts → openai-compatible.ts
  * Used by: providers/registry.ts
  */
 
-import { ProviderError } from '../core/errors.js';
-import type {
-    LLMProvider,
-    ChatMessage,
-    ChatOptions,
-    ChatResponse,
-    ChatChunk,
-    ModelInfo,
-    TokenUsage,
-} from './types.js';
-import { logger } from '../utils/logger.js';
+import type { ModelInfo } from './types.js';
+import { OpenAICompatibleProvider } from './openai-compatible.js';
 import { fetchWithRetry, OLLAMA_TIMEOUT_MS } from './provider-errors.js';
-import { normalizeStopReason, toPlainMessages } from './messages.js';
 
 /** Configuration required to create an Ollama provider. */
 export interface OllamaProviderConfig {
@@ -33,188 +24,47 @@ const DEFAULTS = {
     model: 'llama3.2:latest',
 } as const;
 
-/**
- * Ollama local model provider implementation.
- *
- * Implements the LLMProvider interface for locally-running models via Ollama.
- */
-export class OllamaProvider implements LLMProvider {
+export class OllamaProvider extends OpenAICompatibleProvider {
     public readonly name = 'ollama' as const;
-    private readonly baseUrl: string;
+    /** Server root, without the /v1 suffix (native endpoints live under /api). */
+    private readonly serverUrl: string;
 
     constructor(config?: OllamaProviderConfig) {
-        this.baseUrl = config?.baseUrl ?? DEFAULTS.baseUrl;
+        const serverUrl = (config?.baseUrl ?? DEFAULTS.baseUrl).replace(/\/+$/, '').replace(/\/v1$/, '');
+        super({
+            name: 'ollama',
+            label: 'Ollama',
+            baseUrl: `${serverUrl}/v1`,
+            defaultModel: DEFAULTS.model,
+            timeoutMs: OLLAMA_TIMEOUT_MS,
+            headers: {},
+        });
+        this.serverUrl = serverUrl;
     }
 
-    /**
-     * Send a non-streaming chat completion request.
-     */
-    async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
-        const model = options?.model ?? DEFAULTS.model;
-        const ollamaMessages = this.prepareMessages(messages, options);
-
-        const body: Record<string, unknown> = {
-            model,
-            messages: ollamaMessages,
-            stream: false,
-        };
-
-        if (options?.temperature !== undefined) {
-            body.options = { ...(body.options as Record<string, unknown> ?? {}), temperature: options.temperature };
-        }
-        if (options?.maxTokens !== undefined) {
-            body.options = { ...(body.options as Record<string, unknown> ?? {}), num_predict: options.maxTokens };
-        }
-
-        logger.debug(`Ollama chat request: model=${model}, messages=${ollamaMessages.length}`);
-
-        const response = await this.request('/api/chat', body);
-
-        return {
-            content: (response.message as Record<string, string>)?.content ?? '',
-            model: (response.model as string) ?? model,
-            usage: this.extractUsage(response),
-            finishReason: (response.done_reason as string) ?? 'stop',
-            stopReason: normalizeStopReason((response.done_reason as string) ?? 'stop'),
-            toolCalls: [],
-        };
-    }
-
-    /**
-     * Send a streaming chat completion request.
-     */
-    async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<ChatChunk> {
-        const model = options?.model ?? DEFAULTS.model;
-        const ollamaMessages = this.prepareMessages(messages, options);
-
-        const body: Record<string, unknown> = {
-            model,
-            messages: ollamaMessages,
-            stream: true,
-        };
-
-        if (options?.temperature !== undefined) {
-            body.options = { ...(body.options as Record<string, unknown> ?? {}), temperature: options.temperature };
-        }
-        if (options?.maxTokens !== undefined) {
-            body.options = { ...(body.options as Record<string, unknown> ?? {}), num_predict: options.maxTokens };
-        }
-
+    /** List models installed in the local Ollama instance. */
+    override async listModels(): Promise<ModelInfo[]> {
         const response = await fetchWithRetry(
-            `${this.baseUrl}/api/chat`,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-            { provider: 'ollama', baseUrl: this.baseUrl, timeoutMs: OLLAMA_TIMEOUT_MS },
-        );
-
-        if (!response.body) {
-            throw new ProviderError('Ollama response has no body', { provider: 'ollama' });
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() ?? '';
-
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-
-                    try {
-                        const data = JSON.parse(line);
-                        const content = data.message?.content ?? '';
-                        const isDone = data.done === true;
-
-                        if (content || isDone) {
-                            yield { content, done: isDone };
-                        }
-
-                        if (isDone) return;
-                    } catch {
-                        // Skip unparseable lines
-                    }
-                }
-            }
-        } finally {
-            reader.releaseLock();
-        }
-
-        yield { content: '', done: true };
-    }
-
-    /**
-     * List available models from the local Ollama instance.
-     */
-    async listModels(): Promise<ModelInfo[]> {
-        const response = await fetchWithRetry(
-            `${this.baseUrl}/api/tags`,
+            `${this.serverUrl}/api/tags`,
             { method: 'GET' },
-            { provider: 'ollama', baseUrl: this.baseUrl, timeoutMs: OLLAMA_TIMEOUT_MS },
+            { provider: 'ollama', baseUrl: this.serverUrl, timeoutMs: OLLAMA_TIMEOUT_MS },
         );
 
         const data = await response.json() as { models?: Array<Record<string, unknown>> };
-        const models = data.models ?? [];
-
-        return models.map((m) => ({
+        return (data.models ?? []).map(m => ({
             id: String(m.name ?? m.model ?? ''),
             name: String(m.name ?? m.model ?? 'Unknown'),
             provider: 'ollama' as const,
         }));
     }
 
-    /**
-     * Validate that Ollama is running and reachable.
-     */
-    async validateConnection(): Promise<boolean> {
+    /** Check that Ollama is running and reachable. */
+    override async validateConnection(): Promise<boolean> {
         try {
-            const response = await fetch(`${this.baseUrl}/api/tags`);
+            const response = await fetch(`${this.serverUrl}/api/tags`);
             return response.ok;
         } catch {
             return false;
         }
-    }
-
-    // ── Private helpers ──
-
-    private prepareMessages(
-        messages: ChatMessage[],
-        options?: ChatOptions,
-    ): Array<{ role: string; content: string }> {
-        const result: Array<{ role: string; content: string }> = [];
-
-        // Add system prompt if provided via options
-        if (options?.systemPrompt) {
-            result.push({ role: 'system', content: options.systemPrompt });
-        }
-
-        for (const msg of toPlainMessages(messages)) {
-            result.push({ role: msg.role, content: msg.content });
-        }
-
-        return result;
-    }
-
-    private async request(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-        const response = await fetchWithRetry(
-            `${this.baseUrl}${path}`,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-            { provider: 'ollama', baseUrl: this.baseUrl, timeoutMs: OLLAMA_TIMEOUT_MS },
-        );
-
-        return response.json() as Promise<Record<string, unknown>>;
-    }
-
-    private extractUsage(response: Record<string, unknown>): TokenUsage {
-        return {
-            promptTokens: (response.prompt_eval_count as number) ?? 0,
-            completionTokens: (response.eval_count as number) ?? 0,
-            totalTokens: ((response.prompt_eval_count as number) ?? 0) + ((response.eval_count as number) ?? 0),
-        };
     }
 }
