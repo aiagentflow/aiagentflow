@@ -1,9 +1,10 @@
 /**
  * MockProvider — scripted LLM provider for deterministic workflow tests.
  *
- * Replays a queue of responses in order. Each step may request tool calls,
- * which are executed through `onToolCall` before the step's text is returned.
- * Every call is recorded so tests can assert on prompts and tool results.
+ * Replays a queue of responses in order. A step with `toolCalls` returns them
+ * with stopReason `tool_use`; the agent executes them and calls again, which
+ * consumes the next step. Every call is recorded so tests can assert on the
+ * messages and options each agent sent.
  */
 
 import type {
@@ -15,14 +16,13 @@ import type {
     ChatChunk,
     ModelInfo,
     ToolCall,
-    ToolResult,
 } from '../../src/providers/types.js';
 
 /** One scripted model turn. */
 export interface MockStep {
     /** Final text returned to the agent. */
     content: string;
-    /** Tool calls the model makes before answering. */
+    /** Tool calls the model requests on this turn. */
     toolCalls?: Array<{ name: string; input: Record<string, unknown> }>;
     /** Optional assertion run against the request before responding. */
     expect?: (messages: ChatMessage[], options: ChatOptions | undefined) => void;
@@ -32,7 +32,6 @@ export interface MockStep {
 export interface MockCall {
     messages: ChatMessage[];
     options: ChatOptions | undefined;
-    toolResults: ToolResult[];
 }
 
 export class MockProvider implements LLMProvider {
@@ -43,6 +42,12 @@ export class MockProvider implements LLMProvider {
     constructor(steps: Array<MockStep | string>, name: LLMProviderName = 'ollama') {
         this.steps = steps.map(s => (typeof s === 'string' ? { content: s } : s));
         this.name = name;
+    }
+
+    /** Text of the first user message sent on call `index`. */
+    userPrompt(index: number): string {
+        const msg = this.calls[index]?.messages.find(m => m.role === 'user');
+        return msg && msg.role === 'user' ? msg.content : '';
     }
 
     /** Number of scripted steps not yet consumed. */
@@ -56,31 +61,31 @@ export class MockProvider implements LLMProvider {
             throw new Error(`MockProvider script exhausted after ${this.calls.length} call(s)`);
         }
         step.expect?.(messages, options);
+        this.calls.push({ messages: [...messages], options });
 
-        const toolResults: ToolResult[] = [];
-        for (const [i, tc] of (step.toolCalls ?? []).entries()) {
-            if (!options?.onToolCall) {
-                throw new Error(`Step requested tool "${tc.name}" but no onToolCall was provided`);
-            }
-            const call: ToolCall = { name: tc.name, input: tc.input, callId: `call_${this.calls.length}_${i}` };
-            toolResults.push(await options.onToolCall(call));
-        }
-
-        this.calls.push({ messages, options, toolResults });
-
+        const toolCalls: ToolCall[] = (step.toolCalls ?? []).map((tc, i) => ({
+            name: tc.name,
+            input: tc.input,
+            callId: `call_${this.calls.length}_${i}`,
+        }));
         const completionTokens = Math.ceil(step.content.length / 4);
         return {
             content: step.content,
             model: options?.model ?? 'mock-model',
             usage: { promptTokens: 10, completionTokens, totalTokens: 10 + completionTokens },
-            finishReason: 'stop',
+            finishReason: toolCalls.length > 0 ? 'tool_use' : 'end_turn',
+            stopReason: toolCalls.length > 0 ? 'tool_use' : 'end_turn',
+            toolCalls,
         };
     }
 
     async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<ChatChunk> {
         const response = await this.chat(messages, options);
         yield { content: response.content, done: false };
-        yield { content: '', done: true };
+        if (response.toolCalls.length > 0) {
+            yield { content: '', done: false, toolCalls: response.toolCalls };
+        }
+        yield { content: '', done: true, stopReason: response.stopReason };
     }
 
     async listModels(): Promise<ModelInfo[]> {

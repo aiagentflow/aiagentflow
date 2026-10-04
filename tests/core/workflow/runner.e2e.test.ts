@@ -95,7 +95,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
         dir = setupProject();
         const { provider } = await run(dir, [PLAN, CODE, 'APPROVE', 'PASS', TESTS, 'PASS']);
 
-        const coderPrompt = provider.calls[1]!.messages[0]!.content;
+        const coderPrompt = provider.userPrompt(1);
         expect(coderPrompt).toContain('Create src/app.ts');
     });
 
@@ -121,7 +121,7 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
         expect(ctx.history.map(h => h.to)).toContain('tests_failed');
         expect(existsSync(join(dir, 'src', 'fixed.ts'))).toBe(true);
         // Fixer sees the failing test output
-        expect(provider.calls[5]!.messages[0]!.content).toContain('expected src/fixed.ts to exist');
+        expect(provider.userPrompt(5)).toContain('expected src/fixed.ts to exist');
     });
 
     it('fails once max iterations are exceeded', async () => {
