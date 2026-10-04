@@ -43,6 +43,8 @@ import { buildTestCommand } from '../../utils/package-manager.js';
 import { WORKFLOW_PRESETS, type WorkflowMode } from '../config/defaults.js';
 import { WorkflowError } from '../errors.js';
 import { createStreamRenderer } from '../../cli/utils/stream-renderer.js';
+import { confirmCommand } from '../../cli/utils/confirm-command.js';
+import { ChangeSet } from '../../tools/repo.js';
 
 export interface RunOptions {
     /** Project root directory. */
@@ -364,9 +366,21 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
                 break;
             }
 
-            const agent = createAgent(agentRole, config, projectRoot, { tools: mcpRegistry?.toolsFor(agentRole) });
-            const agentConfig = config.agents[agentRole];
             const spinner = ora(`Running ${agentRole} agent...`).start();
+            const changes = new ChangeSet();
+            const agent = createAgent(agentRole, config, projectRoot, {
+                tools: mcpRegistry?.toolsFor(agentRole),
+                changes,
+                // Pause the spinner while asking, so the prompt stays readable
+                confirmCommand: auto ? undefined : async (command) => {
+                    const spinning = spinner.isSpinning;
+                    spinner.stop();
+                    const answer = await confirmCommand(command);
+                    if (spinning) spinner.start();
+                    return answer;
+                },
+            });
+            const agentConfig = config.agents[agentRole];
 
             try {
                 const agentInput = {
@@ -415,7 +429,7 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
                 }
 
                 // Transition based on agent output
-                ctx = await applyAgentOutput(ctx, agentRole, output.content, config, projectRoot, qaPolicy);
+                ctx = await applyAgentOutput(ctx, agentRole, output.content, config, projectRoot, qaPolicy, changes);
             } catch (err) {
                 spinner.fail(`${agentRole} failed`);
 
@@ -755,6 +769,7 @@ async function applyAgentOutput(
     config: AppConfig,
     projectRoot: string,
     qaPolicy: QAPolicy,
+    changes: ChangeSet,
 ): Promise<WorkflowContext> {
     switch (role) {
         case 'architect':
@@ -765,7 +780,7 @@ async function applyAgentOutput(
             return ctx;
 
         case 'coder': {
-            const files = parseAndWriteFiles(projectRoot, content);
+            const files = collectChangedFiles(changes, content, projectRoot, config);
 
             // Format silently, then lint as a gate
             if (config.workflow.formatCommand) {
@@ -818,7 +833,7 @@ async function applyAgentOutput(
         }
 
         case 'tester': {
-            const testFiles = parseAndWriteFiles(projectRoot, content);
+            const testFiles = collectChangedFiles(changes, content, projectRoot, config);
             ctx = transition(ctx, {
                 type: 'TESTS_WRITTEN',
                 payload: { testFiles: testFiles.length > 0 ? testFiles : ['(no test files parsed)'] },
@@ -848,7 +863,7 @@ async function applyAgentOutput(
         }
 
         case 'fixer': {
-            const fixedFiles = parseAndWriteFiles(projectRoot, content);
+            const fixedFiles = collectChangedFiles(changes, content, projectRoot, config);
 
             // Re-format after fixes
             if (config.workflow.formatCommand) {
@@ -879,6 +894,23 @@ async function applyAgentOutput(
         default:
             return ctx;
     }
+}
+
+/**
+ * Files a code-writing agent changed during its step.
+ *
+ * Normally these are the files it edited through tools. If it made no tool
+ * edits but replied with `FILE:` blocks (legacy mode, or a model that ignores
+ * tools), those blocks are written instead.
+ */
+function collectChangedFiles(changes: ChangeSet, content: string, projectRoot: string, config: AppConfig): string[] {
+    if (changes.size > 0) return changes.files;
+
+    const written = parseAndWriteFiles(projectRoot, content);
+    if (written.length > 0 && !config.workflow.legacyFileBlocks) {
+        logger.warn('Agent replied with FILE: blocks instead of editing through tools; wrote them anyway.');
+    }
+    return written;
 }
 
 /** Print a colored summary of the workflow execution. */

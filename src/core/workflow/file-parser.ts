@@ -14,7 +14,8 @@
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { dirname } from 'node:path';
+import { resolveInside } from '../../tools/repo.js';
 import { logger } from '../../utils/logger.js';
 
 /** A parsed file extracted from agent output. */
@@ -127,13 +128,14 @@ export function writeFiles(projectRoot: string, files: ParsedFile[]): string[] {
     const writtenPaths: string[] = [];
 
     for (const file of files) {
-        // Prevent path traversal
-        if (file.path.includes('..')) {
-            logger.warn(`Skipping file with path traversal: ${file.path}`);
+        // Prevent writes outside the project (.., absolute paths, symlinks)
+        let absolutePath: string;
+        try {
+            absolutePath = resolveInside(projectRoot, file.path.replace(/^\/+/, ''));
+        } catch {
+            logger.warn(`Skipping file outside the project: ${file.path}`);
             continue;
         }
-
-        const absolutePath = join(projectRoot, file.path);
         const dir = dirname(absolutePath);
 
         mkdirSync(dir, { recursive: true });
