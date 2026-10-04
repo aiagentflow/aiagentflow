@@ -5,16 +5,16 @@
  * Used by: workflow runner
  */
 
-import { BaseAgent, type AgentInput, type AgentOutput } from '../base.js';
+import { BaseAgent, type AgentInput, type AgentOptions, type AgentOutput } from '../base.js';
 import { loadAgentPrompt, loadCodingStandards } from '../../prompts/library.js';
-import type { LLMProvider, ChatResponse } from '../../providers/types.js';
+import type { LLMProvider } from '../../providers/types.js';
 
 export class ReviewerAgent extends BaseAgent {
     private readonly projectRoot: string;
 
     constructor(
         provider: LLMProvider,
-        options: { model: string; temperature?: number; maxTokens?: number },
+        options: AgentOptions,
         projectRoot: string,
     ) {
         super('reviewer', provider, { ...options, temperature: options.temperature ?? 0.5 });
@@ -44,13 +44,6 @@ export class ReviewerAgent extends BaseAgent {
         }
 
         return prompt;
-    }
-
-    /**
-     * Parse the review response to extract approval status.
-     */
-    protected override parseResponse(response: ChatResponse): string {
-        return response.content;
     }
 
     /**
