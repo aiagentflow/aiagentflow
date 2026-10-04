@@ -19,9 +19,11 @@ import type {
     TokenUsage,
     ToolDefinition,
     ToolCall,
+    StopReason,
 } from './types.js';
 import { logger } from '../utils/logger.js';
 import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
+import { normalizeStopReason } from './messages.js';
 
 /** Configuration required to create an Anthropic provider. */
 export interface AnthropicProviderConfig {
@@ -61,129 +63,34 @@ export class AnthropicProvider implements LLMProvider {
 
     /**
      * Send a non-streaming chat completion request.
-     * If tools are provided and the model calls one, executes it via onToolCall and loops.
+     * Tool calls the model requests are returned in `toolCalls`; the caller executes them.
      */
     async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
-        const { systemPrompt, apiMessages } = this.prepareMessages(messages, options);
         const model = options?.model ?? DEFAULTS.model;
-        const maxTokens = options?.maxTokens ?? DEFAULTS.maxTokens;
+        const body = this.buildBody(messages, options, model);
 
-        // Mutable conversation for the tool-use loop
-        const conversationMessages: Array<Record<string, unknown>> = [...apiMessages];
-        let totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+        logger.debug(`Anthropic chat request: model=${model}, messages=${messages.length}`);
 
-        for (let turn = 0; turn < 10; turn++) {
-            const body: Record<string, unknown> = {
-                model,
-                max_tokens: maxTokens,
-                messages: conversationMessages,
-            };
+        const response = await this.request('/v1/messages', body);
+        const stopReason = response.stop_reason as string | undefined;
 
-            if (systemPrompt) body.system = systemPrompt;
-            if (options?.temperature !== undefined) body.temperature = options.temperature;
-            if (options?.stopSequences?.length) body.stop_sequences = options.stopSequences;
-            if (options?.tools?.length) body.tools = this.serializeTools(options.tools);
-
-            logger.debug(`Anthropic chat request: model=${model}, messages=${conversationMessages.length}`);
-
-            const response = await this.request('/v1/messages', body);
-            const usage = this.extractUsage(response);
-            totalUsage = {
-                promptTokens: totalUsage.promptTokens + usage.promptTokens,
-                completionTokens: totalUsage.completionTokens + usage.completionTokens,
-                totalTokens: totalUsage.totalTokens + usage.totalTokens,
-            };
-
-            const stopReason = response.stop_reason as string | undefined;
-
-            if (stopReason === 'tool_use' && options?.onToolCall) {
-                // Extract tool calls from the response content blocks
-                const contentBlocks = response.content as Array<Record<string, unknown>>;
-                const toolUseBlocks = contentBlocks.filter(b => b.type === 'tool_use');
-
-                if (toolUseBlocks.length === 0) break;
-
-                // Append assistant message with tool use blocks
-                conversationMessages.push({ role: 'assistant', content: contentBlocks });
-
-                // Execute all tool calls and collect results
-                const toolResults: Array<Record<string, unknown>> = [];
-                for (const block of toolUseBlocks) {
-                    const toolCall: ToolCall = {
-                        name: block.name as string,
-                        input: (block.input as Record<string, unknown>) ?? {},
-                        callId: block.id as string,
-                    };
-                    logger.debug(`Executing MCP tool: ${toolCall.name}`);
-
-                    const result = await options.onToolCall(toolCall);
-                    toolResults.push({
-                        type: 'tool_result',
-                        tool_use_id: result.callId,
-                        content: result.content,
-                        ...(result.isError ? { is_error: true } : {}),
-                    });
-                }
-
-                // Append user message with tool results
-                conversationMessages.push({ role: 'user', content: toolResults });
-                continue;
-            }
-
-            // Model produced final text — done
-            const content = this.extractContent(response);
-            return {
-                content,
-                model: (response.model as string | undefined) ?? model,
-                usage: totalUsage,
-                finishReason: stopReason ?? 'unknown',
-            };
-        }
-
-        // Exceeded max turns — return whatever text we have
-        const lastResponse = await this.request('/v1/messages', {
-            model,
-            max_tokens: maxTokens,
-            messages: conversationMessages,
-            ...(systemPrompt ? { system: systemPrompt } : {}),
-        });
         return {
-            content: this.extractContent(lastResponse),
-            model: (lastResponse.model as string | undefined) ?? model,
-            usage: totalUsage,
-            finishReason: 'max_tool_turns',
+            content: this.extractContent(response),
+            model: (response.model as string | undefined) ?? model,
+            usage: this.extractUsage(response),
+            finishReason: stopReason ?? 'unknown',
+            stopReason: normalizeStopReason(stopReason),
+            toolCalls: this.extractToolCalls(response),
         };
-    }
-
-    private serializeTools(tools: readonly ToolDefinition[]): Array<Record<string, unknown>> {
-        return tools.map(t => ({
-            name: t.name,
-            description: t.description,
-            input_schema: t.inputSchema,
-        }));
     }
 
     /**
      * Send a streaming chat completion request.
+     * Text arrives incrementally; each tool call is emitted once its input JSON is complete.
      */
     async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<ChatChunk> {
-        const { systemPrompt, apiMessages } = this.prepareMessages(messages, options);
         const model = options?.model ?? DEFAULTS.model;
-        const maxTokens = options?.maxTokens ?? DEFAULTS.maxTokens;
-
-        const body: Record<string, unknown> = {
-            model,
-            max_tokens: maxTokens,
-            messages: apiMessages,
-            stream: true,
-        };
-
-        if (systemPrompt) {
-            body.system = systemPrompt;
-        }
-        if (options?.temperature !== undefined) {
-            body.temperature = options.temperature;
-        }
+        const body = { ...this.buildBody(messages, options, model), stream: true };
 
         const response = await fetchWithRetry(
             `${this.baseUrl}/v1/messages`,
@@ -198,6 +105,9 @@ export class AnthropicProvider implements LLMProvider {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let stopReason: StopReason | undefined;
+        // Tool-use blocks being streamed, keyed by content block index
+        const pendingTools = new Map<number, { id: string; name: string; json: string }>();
 
         try {
             while (true) {
@@ -212,20 +122,33 @@ export class AnthropicProvider implements LLMProvider {
                     if (!line.startsWith('data: ')) continue;
                     const data = line.slice(6).trim();
                     if (data === '[DONE]') {
-                        yield { content: '', done: true };
+                        yield { content: '', done: true, stopReason };
                         return;
                     }
 
+                    let event: AnthropicStreamEvent;
                     try {
-                        const event = JSON.parse(data);
-                        if (event.type === 'content_block_delta' && event.delta?.text) {
-                            yield { content: event.delta.text, done: false };
-                        } else if (event.type === 'message_stop') {
-                            yield { content: '', done: true };
-                            return;
-                        }
+                        event = JSON.parse(data) as AnthropicStreamEvent;
                     } catch {
-                        // Skip unparseable lines
+                        continue; // Skip unparseable lines
+                    }
+
+                    if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+                        pendingTools.set(event.index ?? -1, { id: event.content_block.id ?? '', name: event.content_block.name ?? '', json: '' });
+                    } else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+                        const tool = pendingTools.get(event.index ?? -1);
+                        if (tool) tool.json += event.delta.partial_json ?? '';
+                    } else if (event.type === 'content_block_delta' && event.delta?.text) {
+                        yield { content: event.delta.text, done: false };
+                    } else if (event.type === 'content_block_stop' && pendingTools.has(event.index ?? -1)) {
+                        const tool = pendingTools.get(event.index ?? -1)!;
+                        pendingTools.delete(event.index ?? -1);
+                        yield { content: '', done: false, toolCalls: [{ callId: tool.id, name: tool.name, input: parseToolInput(tool.json) }] };
+                    } else if (event.type === 'message_delta' && event.delta?.stop_reason) {
+                        stopReason = normalizeStopReason(event.delta.stop_reason);
+                    } else if (event.type === 'message_stop') {
+                        yield { content: '', done: true, stopReason };
+                        return;
                     }
                 }
             }
@@ -233,7 +156,29 @@ export class AnthropicProvider implements LLMProvider {
             reader.releaseLock();
         }
 
-        yield { content: '', done: true };
+        yield { content: '', done: true, stopReason };
+    }
+
+    private buildBody(messages: ChatMessage[], options: ChatOptions | undefined, model: string): Record<string, unknown> {
+        const { systemPrompt, apiMessages } = this.prepareMessages(messages, options);
+        const body: Record<string, unknown> = {
+            model,
+            max_tokens: options?.maxTokens ?? DEFAULTS.maxTokens,
+            messages: apiMessages,
+        };
+        if (systemPrompt) body.system = systemPrompt;
+        if (options?.temperature !== undefined) body.temperature = options.temperature;
+        if (options?.stopSequences?.length) body.stop_sequences = options.stopSequences;
+        if (options?.tools?.length) body.tools = this.serializeTools(options.tools);
+        return body;
+    }
+
+    private serializeTools(tools: readonly ToolDefinition[]): Array<Record<string, unknown>> {
+        return tools.map(t => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.inputSchema,
+        }));
     }
 
     /**
@@ -292,25 +237,65 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     /**
-     * Separate system prompt from messages (Anthropic uses a top-level field).
+     * Convert messages to the Anthropic format.
+     * System messages move to the top-level `system` field; tool calls and
+     * results become `tool_use` / `tool_result` content blocks.
      */
     private prepareMessages(
         messages: ChatMessage[],
         options?: ChatOptions,
-    ): { systemPrompt: string | undefined; apiMessages: Array<{ role: string; content: string }> } {
+    ): { systemPrompt: string | undefined; apiMessages: Array<Record<string, unknown>> } {
         let systemPrompt = options?.systemPrompt;
-        const apiMessages: Array<{ role: string; content: string }> = [];
+        const apiMessages: Array<Record<string, unknown>> = [];
 
         for (const msg of messages) {
-            if (msg.role === 'system') {
-                // Anthropic doesn't support system role in messages array
-                systemPrompt = systemPrompt ? `${systemPrompt}\n\n${msg.content}` : msg.content;
-            } else {
-                apiMessages.push({ role: msg.role, content: msg.content });
+            switch (msg.role) {
+                case 'system':
+                    systemPrompt = systemPrompt ? `${systemPrompt}\n\n${msg.content}` : msg.content;
+                    break;
+                case 'user':
+                    apiMessages.push({ role: 'user', content: msg.content });
+                    break;
+                case 'assistant': {
+                    if (!msg.toolCalls?.length) {
+                        apiMessages.push({ role: 'assistant', content: msg.content });
+                        break;
+                    }
+                    const blocks: Array<Record<string, unknown>> = [];
+                    if (msg.content) blocks.push({ type: 'text', text: msg.content });
+                    for (const call of msg.toolCalls) {
+                        blocks.push({ type: 'tool_use', id: call.callId, name: call.name, input: call.input });
+                    }
+                    apiMessages.push({ role: 'assistant', content: blocks });
+                    break;
+                }
+                case 'tool':
+                    apiMessages.push({
+                        role: 'user',
+                        content: msg.results.map(r => ({
+                            type: 'tool_result',
+                            tool_use_id: r.callId,
+                            content: r.content,
+                            ...(r.isError ? { is_error: true } : {}),
+                        })),
+                    });
+                    break;
             }
         }
 
         return { systemPrompt, apiMessages };
+    }
+
+    private extractToolCalls(response: Record<string, unknown>): ToolCall[] {
+        const content = response.content;
+        if (!Array.isArray(content)) return [];
+        return content
+            .filter((block: Record<string, unknown>) => block.type === 'tool_use')
+            .map((block: Record<string, unknown>) => ({
+                callId: block.id as string,
+                name: block.name as string,
+                input: (block.input as Record<string, unknown>) ?? {},
+            }));
     }
 
     private extractContent(response: Record<string, unknown>): string {
@@ -331,5 +316,24 @@ export class AnthropicProvider implements LLMProvider {
             completionTokens: usage?.output_tokens ?? 0,
             totalTokens: (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0),
         };
+    }
+}
+
+/** The subset of Anthropic SSE event fields this adapter reads. */
+interface AnthropicStreamEvent {
+    type: string;
+    index?: number;
+    content_block?: { type: string; id?: string; name?: string };
+    delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string };
+}
+
+/** Parse streamed tool input JSON; an empty or malformed payload becomes `{}`. */
+function parseToolInput(json: string): Record<string, unknown> {
+    if (!json.trim()) return {};
+    try {
+        const parsed: unknown = JSON.parse(json);
+        return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+    } catch {
+        return {};
     }
 }
