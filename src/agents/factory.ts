@@ -37,6 +37,8 @@ export interface AgentFactoryOptions {
     changes?: ChangeSet;
     /** Interactive approval for commands that need it. Omit for non-interactive runs. */
     confirmCommand?: (command: string) => Promise<ConfirmAnswer>;
+    /** Overrides the role's maxTurns (e.g. from a workflow step). */
+    maxTurns?: number;
 }
 
 /**
@@ -83,7 +85,7 @@ export function createAgent(
         model: agentConfig.model,
         temperature: agentConfig.temperature,
         maxTokens: agentConfig.maxTokens,
-        maxTurns: agentConfig.maxTurns,
+        maxTurns: factoryOpts?.maxTurns ?? agentConfig.maxTurns,
         tools,
         legacyFileBlocks,
     };
