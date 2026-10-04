@@ -13,6 +13,7 @@ import { configExists, loadConfig } from '../../core/config/manager.js';
 import { createAgent } from '../../agents/factory.js';
 import { ALL_AGENT_ROLES, AGENT_ROLE_LABELS, type AgentRole } from '../../agents/types.js';
 import { createStreamRenderer } from '../utils/stream-renderer.js';
+import { PluginRegistry } from '../../plugins/registry.js';
 import { logger } from '../../utils/logger.js';
 
 export const chatCommand = new Command('chat')
@@ -69,6 +70,8 @@ export const chatCommand = new Command('chat')
         }
 
         const config = loadConfig(projectRoot);
+        // Plugin providers must be registered before agents are created
+        await new PluginRegistry().load(projectRoot);
         const agent = createAgent(role, config, projectRoot);
         const label = AGENT_ROLE_LABELS[role];
 

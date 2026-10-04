@@ -18,8 +18,8 @@ import { BUILTIN_TOOL_NAMES, DEFAULT_DENY } from '../../tools/permissions.js';
  * Schema for a single agent role's configuration.
  */
 export const agentRoleConfigSchema = z.object({
-    /** Which provider to use for this agent role. */
-    provider: z.enum(['anthropic', 'gemini', 'groq', 'ollama', 'openai', 'openrouter']),
+    /** Which provider to use for this agent role: a built-in name or one contributed by a plugin. */
+    provider: z.string().min(1),
     /** The model identifier to use. */
     model: z.string().min(1),
     /** Sampling temperature (0.0 = deterministic, higher = more creative). */
@@ -104,7 +104,8 @@ export const providerConfigSchema = z.object({
     ollama: ollamaProviderSchema.optional(),
     openai: openaiProviderSchema.optional(),
     openrouter: openrouterProviderSchema.optional(),
-});
+// Other keys configure plugin providers and are passed through as-is
+}).catchall(z.record(z.unknown()));
 
 /**
  * Schema for project-level settings.

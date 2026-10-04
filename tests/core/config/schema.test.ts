@@ -37,12 +37,10 @@ describe('agentRoleConfigSchema', () => {
         }
     });
 
-    it('rejects invalid provider', () => {
-        const result = agentRoleConfigSchema.safeParse({
-            provider: 'invalid-provider',
-            model: 'gpt-4',
-        });
-        expect(result.success).toBe(false);
+    it('rejects an empty provider and accepts plugin provider names', () => {
+        expect(agentRoleConfigSchema.safeParse({ provider: '', model: 'gpt-4' }).success).toBe(false);
+        // Plugin providers are checked when the provider is created, not by the schema
+        expect(agentRoleConfigSchema.safeParse({ provider: 'my-plugin-provider', model: 'm' }).success).toBe(true);
     });
 
     it('accepts gemini as a valid provider', () => {

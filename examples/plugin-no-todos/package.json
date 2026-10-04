@@ -1,0 +1,8 @@
+{
+  "name": "aiagentflow-plugin-no-todos",
+  "version": "1.0.0",
+  "description": "Example aiagentflow plugin: a workflow step that fails on TODO comments, and a tool that lists them.",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT"
+}

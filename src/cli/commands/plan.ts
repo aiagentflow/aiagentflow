@@ -16,6 +16,7 @@ import chalk from 'chalk';
 import { configExists, loadConfig } from '../../core/config/manager.js';
 import { loadContextDocuments, formatContextForAgent } from '../../core/workflow/context-loader.js';
 import { createAgent } from '../../agents/factory.js';
+import { PluginRegistry } from '../../plugins/registry.js';
 import { logger } from '../../utils/logger.js';
 
 export const planCommand = new Command('plan')
@@ -55,6 +56,8 @@ export const planCommand = new Command('plan')
 
             // Use the architect agent to break down the docs
             const config = loadConfig(projectRoot);
+            // Plugin providers must be registered before agents are created
+            await new PluginRegistry().load(projectRoot);
             const agent = createAgent('architect', config, projectRoot);
             const spinner = ora('Generating task breakdown...').start();
 

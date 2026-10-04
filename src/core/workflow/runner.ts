@@ -29,6 +29,7 @@ import { logger } from '../../utils/logger.js';
 import { WORKFLOW_PRESETS, type WorkflowMode } from '../config/defaults.js';
 import { WorkflowError } from '../errors.js';
 import { executeWorkflow } from './executor.js';
+import { PluginRegistry } from '../../plugins/registry.js';
 import type { BudgetLimits } from './budget-tracker.js';
 import { firstStep, type WorkflowDefinition } from './definition.js';
 import { DEFAULT_WORKFLOW, getWorkflow } from './workflow-loader.js';
@@ -119,6 +120,8 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         return createWorkflowContext(task, workflow.name, firstStep(workflow).id, maxIterations);
     }
 
+    const plugins = await loadPluginsFor(workflow, projectRoot);
+
     logger.header('AI Workflow — Running Task');
     console.log(chalk.gray(`Task: ${task}`));
     console.log(chalk.gray(`Workflow: ${workflow.name}`));
@@ -170,6 +173,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         showSummary,
         events: options.events,
         budget: options.budget,
+        plugins,
     });
 }
 
@@ -211,6 +215,7 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
 
     const tokenTracker = new TokenTracker();
     tokenTracker.restoreEntries(session.tokenUsage);
+    const plugins = await loadPluginsFor(workflow, projectRoot);
 
     // Restore worktree if the session ran in one
     let effectiveRoot = projectRoot;
@@ -296,6 +301,7 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
         worktree,
         events: options.events,
         budget: options.budget,
+        plugins,
     });
 }
 
@@ -334,6 +340,27 @@ interface RunLoopParams {
     showSummary?: boolean;
     events?: EventBus;
     budget?: BudgetLimits;
+    plugins: PluginRegistry;
+}
+
+/**
+ * Load plugins and check that every plugin step the workflow uses exists.
+ * Runs before anything is created (worktree, session), so a bad reference leaves nothing behind.
+ *
+ * @throws {WorkflowError} listing unknown plugin steps
+ */
+async function loadPluginsFor(workflow: WorkflowDefinition, projectRoot: string): Promise<PluginRegistry> {
+    const plugins = new PluginRegistry();
+    await plugins.load(projectRoot);
+    const missing = workflow.steps.filter(s => s.uses && !plugins.step(s.uses)).map(s => s.uses!);
+    if (missing.length > 0) {
+        const available = plugins.stepRefs();
+        throw new WorkflowError(
+            `Workflow "${workflow.name}" uses unknown plugin step(s): ${missing.join(', ')}. ` +
+            (available.length > 0 ? `Available: ${available.join(', ')}` : 'No plugin steps are installed.'),
+        );
+    }
+    return plugins;
 }
 
 /**
@@ -515,7 +542,6 @@ function printDryRun(
     console.log(chalk.bold('  Steps'));
     console.log();
     workflow.steps.forEach((step, i) => {
-        const agentConfig = config.agents[step.agent];
         const flags = [
             step.trigger === 'on-fail' ? 'on fail only' : undefined,
             step.checks.length > 0 ? `checks: ${step.checks.join(', ')}` : undefined,
@@ -524,8 +550,13 @@ function printDryRun(
             step.next ? `next → ${step.next}` : undefined,
         ].filter(Boolean).join(' | ');
 
-        console.log(chalk.bold(`  ${i + 1}. ${step.id} (${AGENT_ROLE_LABELS[step.agent]})`));
-        console.log(chalk.gray(`     Provider: ${agentConfig.provider} / ${agentConfig.model}`));
+        if (step.agent) {
+            const agentConfig = config.agents[step.agent];
+            console.log(chalk.bold(`  ${i + 1}. ${step.id} (${AGENT_ROLE_LABELS[step.agent]})`));
+            console.log(chalk.gray(`     Provider: ${agentConfig.provider} / ${agentConfig.model}`));
+        } else {
+            console.log(chalk.bold(`  ${i + 1}. ${step.id} (plugin step ${step.uses})`));
+        }
         if (step.description) console.log(chalk.gray(`     ${step.description}`));
         if (flags) console.log(chalk.gray(`     ${flags}`));
         console.log();
