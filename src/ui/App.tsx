@@ -1,9 +1,9 @@
 /**
  * TUI root application — tab-based layout for the aiagentflow dashboard.
  *
- * Screens:
- *   1. Runs    — live list of active worktree runs (auto-refreshes)
- *   2. Approve — plan approval (shown when a run is awaiting approval)
+ * Sections:
+ *   1. Runs     — live list of active worktree runs (auto-refreshes)
+ *   2. Activity — live event feed of the most recent run
  *
  * Dependency direction: App.tsx → ink, ui/screens/*
  * Used by: cli/commands/ui.ts
@@ -12,6 +12,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { RunsList } from './screens/RunsList.js';
+import { Activity } from './screens/Activity.js';
 
 type Screen = 'runs';
 
@@ -41,6 +42,10 @@ export function App({ projectRoot }: Props): React.JSX.Element {
 
             <Box paddingLeft={1}>
                 {screen === 'runs' && <RunsList projectRoot={projectRoot} />}
+            </Box>
+
+            <Box paddingLeft={1} marginTop={1}>
+                <Activity projectRoot={projectRoot} />
             </Box>
         </Box>
     );
