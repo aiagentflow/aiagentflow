@@ -29,6 +29,7 @@ import { logger } from '../../utils/logger.js';
 import { WORKFLOW_PRESETS, type WorkflowMode } from '../config/defaults.js';
 import { WorkflowError } from '../errors.js';
 import { executeWorkflow } from './executor.js';
+import type { BudgetLimits } from './budget-tracker.js';
 import { firstStep, type WorkflowDefinition } from './definition.js';
 import { DEFAULT_WORKFLOW, getWorkflow } from './workflow-loader.js';
 
@@ -57,6 +58,10 @@ export interface RunOptions {
     showSummary?: boolean;
     /** Receives run events, e.g. for --output json. */
     events?: EventBus;
+    /** Never prompt: implies auto; interactive choices fall back to safe defaults. */
+    headless?: boolean;
+    /** Token, cost, and time caps for the run. */
+    budget?: BudgetLimits;
 }
 
 export interface ResumeOptions {
@@ -72,13 +77,18 @@ export interface ResumeOptions {
     streaming?: boolean;
     /** Receives run events, e.g. for --output json. */
     events?: EventBus;
+    /** Never prompt: implies auto; interactive choices fall back to safe defaults. */
+    headless?: boolean;
+    /** Token, cost, and time caps for the run. */
+    budget?: BudgetLimits;
 }
 
 /**
  * Run a workflow for a task. Returns the final run context.
  */
 export async function runWorkflow(options: RunOptions): Promise<WorkflowContext> {
-    const { projectRoot, task, auto = false, mode, contextPaths, streaming = true, dryRun = false, showSummary = true } = options;
+    const { projectRoot, task, mode, contextPaths, streaming = true, dryRun = false, showSummary = true } = options;
+    const auto = options.auto === true || options.headless === true;
     const config = loadConfig(projectRoot);
     const isolationMode = options.isolation ?? config.workflow.isolation;
     const { definition: workflow } = getWorkflow(projectRoot, options.workflow ?? DEFAULT_WORKFLOW);
@@ -153,6 +163,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         worktree,
         showSummary,
         events: options.events,
+        budget: options.budget,
     });
 }
 
@@ -160,7 +171,8 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
  * Resume an interrupted workflow from a saved session.
  */
 export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowContext> {
-    const { projectRoot, auto = false, mode, streaming = true } = options;
+    const { projectRoot, mode, streaming = true } = options;
+    const auto = options.auto === true || options.headless === true;
     let { sessionId } = options;
 
     // If no session ID, find the most recent non-terminal session
@@ -213,8 +225,8 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
             };
             logger.info(`Restored worktree: ${session.worktreePath} (branch: ${session.worktreeBranch})`);
         } else {
-            // Worktree was discarded — ask what to do
-            const { action } = await prompts({
+            // Worktree was discarded — ask what to do (headless: recreate it)
+            const { action } = options.headless ? { action: 'recreate' } : await prompts({
                 type: 'select',
                 name: 'action',
                 message: `Worktree for this session no longer exists. How would you like to continue?`,
@@ -277,6 +289,7 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
         streaming,
         worktree,
         events: options.events,
+        budget: options.budget,
     });
 }
 
@@ -314,6 +327,7 @@ interface RunLoopParams {
     /** Print token/cost summary at end of run (default: true). */
     showSummary?: boolean;
     events?: EventBus;
+    budget?: BudgetLimits;
 }
 
 /**
@@ -343,6 +357,7 @@ async function runLoop(params: RunLoopParams): Promise<WorkflowContext> {
         ctx = await executeWorkflow({
             ...params,
             events,
+            startedAt,
             mcpRegistry: mcpRegistry.isActive ? mcpRegistry : undefined,
             // Save after each step (crash recovery)
             onStep: (current) => {
@@ -371,6 +386,8 @@ async function runLoop(params: RunLoopParams): Promise<WorkflowContext> {
         await handleWorktreeFinish(worktree, ctx, sourceProjectRoot, config, params.auto);
     }
 
+    const usage = { totalTokens: tokenTracker.getTotalTokens(), costUsd: tokenTracker.estimateCost() };
+    ctx = { ...ctx, usage };
     saveSession(sourceProjectRoot, ctx, tokenTracker.getEntries(), sessionId, worktreeMeta);
 
     events.emit({
@@ -381,8 +398,8 @@ async function runLoop(params: RunLoopParams): Promise<WorkflowContext> {
         iterations: ctx.iteration,
         files: ctx.generatedFiles,
         testFiles: ctx.testFiles,
-        totalTokens: tokenTracker.getTotalTokens(),
-        costUsd: tokenTracker.estimateCost(),
+        totalTokens: usage.totalTokens,
+        costUsd: usage.costUsd,
         durationMs: Date.now() - startedAt,
     });
     stopLogging();

@@ -65,3 +65,11 @@ export class ValidationError extends AppError {
         this.name = 'ValidationError';
     }
 }
+
+/** A run hit its token, cost, or time budget. */
+export class BudgetExceededError extends AppError {
+    constructor(message: string, context?: Record<string, unknown>) {
+        super(message, 'BUDGET_EXCEEDED', context);
+        this.name = 'BudgetExceededError';
+    }
+}

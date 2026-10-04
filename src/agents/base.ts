@@ -14,7 +14,7 @@ import type { LLMProvider, ChatMessage, ChatOptions, ToolCall, ToolResult, Token
 import { addUsage, EMPTY_USAGE } from '../providers/messages.js';
 import type { AgentRole, StreamCallbacks } from './types.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import { ProviderError } from '../core/errors.js';
+import { AppError, BudgetExceededError, ProviderError, WorkflowError } from '../core/errors.js';
 import { logger } from '../utils/logger.js';
 import { AGENT_ROLE_LABELS } from './types.js';
 
@@ -60,6 +60,11 @@ export interface AgentOptions {
     legacyFileBlocks?: boolean;
     /** Observes every executed tool call and its result (for events and logs). */
     onToolResult?: (call: ToolCall, result: ToolResult) => void;
+    /**
+     * Called after every model turn with the usage so far. Throw (e.g.
+     * BudgetExceededError) to stop the agent; the error propagates unchanged.
+     */
+    onTurn?: (usageSoFar: TokenUsage) => void;
 }
 
 /** One model turn, reduced to what the tool loop needs. */
@@ -88,6 +93,7 @@ export abstract class BaseAgent {
     protected readonly maxTurns: number;
     protected readonly legacyFileBlocks: boolean;
     private readonly onToolResult?: (call: ToolCall, result: ToolResult) => void;
+    private readonly onTurn?: (usageSoFar: TokenUsage) => void;
     /** Formatted memory section prepended to the system prompt. Set by factory. */
     memorySection = '';
 
@@ -101,6 +107,7 @@ export abstract class BaseAgent {
         this.maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
         this.legacyFileBlocks = options.legacyFileBlocks ?? false;
         this.onToolResult = options.onToolResult;
+        this.onTurn = options.onTurn;
     }
 
     /**
@@ -121,7 +128,7 @@ export abstract class BaseAgent {
             logger.success(`${label} complete (${usage.totalTokens} tokens)`);
             return { content: this.parseResponse(content), role: this.role, tokensUsed: usage.totalTokens, usage, success: true };
         } catch (err) {
-            if (err instanceof ProviderError) throw err;
+            if (err instanceof AppError) throw err;
             throw new ProviderError(
                 `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
                 { role: this.role, model: this.model },
@@ -178,6 +185,8 @@ export abstract class BaseAgent {
             logger.success(`${label} complete (${usage.totalTokens} tokens)`);
             return { content, role: this.role, tokensUsed: usage.totalTokens, usage, success: true };
         } catch (err) {
+            // Errors raised on purpose (budget, workflow) must not trigger a second attempt
+            if (err instanceof BudgetExceededError || err instanceof WorkflowError) throw err;
             logger.warn(`${label} streaming failed, falling back to non-streaming`);
             logger.debug(`Stream error: ${err instanceof Error ? err.message : String(err)}`);
             return this.execute(input);
@@ -238,6 +247,7 @@ export abstract class BaseAgent {
         for (let i = 0; i < this.maxTurns; i++) {
             const result = await turn(messages, options);
             usage = addUsage(usage, result.usage);
+            this.onTurn?.(usage);
 
             if (result.toolCalls.length === 0 || !this.tools) {
                 const reminder = reminded ? undefined : this.completionReminder();
