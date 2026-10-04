@@ -9,6 +9,7 @@
  */
 
 import { z } from 'zod';
+import { BUILTIN_TOOL_NAMES, DEFAULT_DENY } from '../../tools/permissions.js';
 
 /**
  * Schema for a single agent role's configuration.
@@ -153,6 +154,22 @@ export const workflowConfigSchema = z.object({
 });
 
 /**
+ * Schema for tool permissions: what agents may run and which tools each role gets.
+ */
+export const permissionsConfigSchema = z.object({
+    /** How run_command handles commands that match no allow/deny pattern. */
+    mode: z.enum(['ask', 'auto', 'deny']).default('ask'),
+    /** Command patterns that always run (`*` is a wildcard). Test/lint/format commands are added automatically. */
+    allow: z.array(z.string()).default([]),
+    /** Command patterns that never run. Defaults block privilege escalation, pushes, publishing, and network tools. */
+    deny: z.array(z.string()).default([...DEFAULT_DENY]),
+    /** Built-in tools per role, overriding the defaults (e.g. { "reviewer": ["read_file", "grep"] }). */
+    tools: z.record(z.enum(['architect', 'coder', 'reviewer', 'security', 'tester', 'fixer', 'judge']), z.array(z.enum(BUILTIN_TOOL_NAMES))).default({}),
+    /** Timeout for each run_command call, in milliseconds. */
+    commandTimeoutMs: z.number().int().min(1000).max(3_600_000).default(120_000),
+});
+
+/**
  * Schema for a single MCP server entry.
  */
 export const mcpServerConfigSchema = z.object({
@@ -181,6 +198,8 @@ export const appConfigSchema = z.object({
     project: projectConfigSchema,
     /** Workflow execution settings. */
     workflow: workflowConfigSchema,
+    /** Tool permissions (run_command policy and per-role tool allowlists). */
+    permissions: permissionsConfigSchema.default({}),
     /** MCP server definitions (optional). Keys are logical server names. */
     mcpServers: z.record(mcpServerConfigSchema).default({}),
 });
