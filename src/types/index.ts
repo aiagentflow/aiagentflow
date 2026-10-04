@@ -42,3 +42,6 @@ export type {
 
 // Re-export agent types
 export type { AgentRole } from '../agents/types.js';
+
+// Re-export run event types (for --output json consumers)
+export type { RunEvent, RunEventType, TimedRunEvent } from '../core/events.js';
