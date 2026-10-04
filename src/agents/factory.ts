@@ -15,6 +15,7 @@ import { ToolRegistry, type Tool } from '../tools/registry.js';
 import { createBuiltinTools, commandPolicyFromConfig } from '../tools/builtin.js';
 import type { ChangeSet } from '../tools/repo.js';
 import type { ConfirmAnswer } from '../tools/command.js';
+import type { ToolCall, ToolResult } from '../providers/types.js';
 import { buildTestCommand } from '../utils/package-manager.js';
 import { createProvider } from '../providers/registry.js';
 import { ArchitectAgent } from './roles/architect.js';
@@ -39,6 +40,8 @@ export interface AgentFactoryOptions {
     confirmCommand?: (command: string) => Promise<ConfirmAnswer>;
     /** Overrides the role's maxTurns (e.g. from a workflow step). */
     maxTurns?: number;
+    /** Observes every executed tool call and its result. */
+    onToolResult?: (call: ToolCall, result: ToolResult) => void;
 }
 
 /**
@@ -88,6 +91,7 @@ export function createAgent(
         maxTurns: factoryOpts?.maxTurns ?? agentConfig.maxTurns,
         tools,
         legacyFileBlocks,
+        onToolResult: factoryOpts?.onToolResult,
     };
 
     let agent: BaseAgent;

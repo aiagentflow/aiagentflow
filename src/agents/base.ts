@@ -58,6 +58,8 @@ export interface AgentOptions {
     maxTurns?: number;
     /** Use the v1 prompts where code-writing agents return `FILE:` blocks. */
     legacyFileBlocks?: boolean;
+    /** Observes every executed tool call and its result (for events and logs). */
+    onToolResult?: (call: ToolCall, result: ToolResult) => void;
 }
 
 /** One model turn, reduced to what the tool loop needs. */
@@ -85,6 +87,7 @@ export abstract class BaseAgent {
     protected readonly tools?: ToolRegistry;
     protected readonly maxTurns: number;
     protected readonly legacyFileBlocks: boolean;
+    private readonly onToolResult?: (call: ToolCall, result: ToolResult) => void;
     /** Formatted memory section prepended to the system prompt. Set by factory. */
     memorySection = '';
 
@@ -97,6 +100,7 @@ export abstract class BaseAgent {
         this.tools = options.tools && options.tools.size > 0 ? options.tools : undefined;
         this.maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
         this.legacyFileBlocks = options.legacyFileBlocks ?? false;
+        this.onToolResult = options.onToolResult;
     }
 
     /**
@@ -249,7 +253,9 @@ export abstract class BaseAgent {
             const results: ToolResult[] = [];
             for (const call of result.toolCalls) {
                 logger.debug(`${this.role} calling tool: ${call.name}`);
-                results.push(await this.tools.execute(call));
+                const toolResult = await this.tools.execute(call);
+                this.onToolResult?.(call, toolResult);
+                results.push(toolResult);
             }
             if (this.isDone()) return { content: result.content, usage };
             messages.push(

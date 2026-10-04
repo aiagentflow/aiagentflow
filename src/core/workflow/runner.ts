@@ -18,7 +18,8 @@ import { AGENT_ROLE_LABELS } from '../../agents/types.js';
 import { GitClient } from '../../git/client.js';
 import { createWorktree, mergeBranch, worktreeExists, type WorktreeInfo } from '../../git/worktree.js';
 import { TokenTracker } from './token-tracker.js';
-import { saveSession, loadSession, listSessions } from './session.js';
+import { saveSession, loadSession, listSessions, getEventLogPath } from './session.js';
+import { EventBus, fileListener } from '../events.js';
 import { loadQAPolicy, type QAPolicy } from './qa-policy.js';
 import { loadContextDocuments, loadSourceFiles, type ContextDocument } from './context-loader.js';
 import { loadConfig } from '../config/manager.js';
@@ -54,6 +55,8 @@ export interface RunOptions {
     approvalGates?: string[];
     /** Print the per-agent token/cost summary at the end (default: true). */
     showSummary?: boolean;
+    /** Receives run events, e.g. for --output json. */
+    events?: EventBus;
 }
 
 export interface ResumeOptions {
@@ -67,6 +70,8 @@ export interface ResumeOptions {
     mode?: string;
     /** Stream agent output in real time (default: true). */
     streaming?: boolean;
+    /** Receives run events, e.g. for --output json. */
+    events?: EventBus;
 }
 
 /**
@@ -147,6 +152,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowContext>
         streaming,
         worktree,
         showSummary,
+        events: options.events,
     });
 }
 
@@ -270,6 +276,7 @@ export async function resumeWorkflow(options: ResumeOptions): Promise<WorkflowCo
         auto,
         streaming,
         worktree,
+        events: options.events,
     });
 }
 
@@ -306,6 +313,7 @@ interface RunLoopParams {
     worktree?: WorktreeInfo;
     /** Print token/cost summary at end of run (default: true). */
     showSummary?: boolean;
+    events?: EventBus;
 }
 
 /**
@@ -317,7 +325,13 @@ async function runLoop(params: RunLoopParams): Promise<WorkflowContext> {
     const { projectRoot, sourceProjectRoot, config, tokenTracker, worktree, showSummary = true } = params;
     const startedAt = Date.now();
     const worktreeMeta = worktree ? { branch: worktree.branch, path: worktree.path } : undefined;
-    let sessionId = params.sessionId;
+    const resumed = params.sessionId !== undefined;
+    // Save up front so the run is listed immediately and every event has a session
+    let sessionId = saveSession(sourceProjectRoot, params.ctx, tokenTracker.getEntries(), params.sessionId, worktreeMeta);
+
+    const events = params.events ?? new EventBus();
+    const stopLogging = events.subscribe(fileListener(getEventLogPath(sourceProjectRoot, sessionId)));
+    events.emit({ type: 'run.started', sessionId, task: params.ctx.task, workflow: params.workflow.name, resumed });
 
     const mcpRegistry = new McpRegistry();
     if (Object.keys(config.mcpServers ?? {}).length > 0) {
@@ -328,6 +342,7 @@ async function runLoop(params: RunLoopParams): Promise<WorkflowContext> {
     try {
         ctx = await executeWorkflow({
             ...params,
+            events,
             mcpRegistry: mcpRegistry.isActive ? mcpRegistry : undefined,
             // Save after each step (crash recovery)
             onStep: (current) => {
@@ -357,6 +372,20 @@ async function runLoop(params: RunLoopParams): Promise<WorkflowContext> {
     }
 
     saveSession(sourceProjectRoot, ctx, tokenTracker.getEntries(), sessionId, worktreeMeta);
+
+    events.emit({
+        type: 'run.finished',
+        sessionId,
+        status: ctx.status,
+        ...(ctx.failureReason ? { failureReason: ctx.failureReason } : {}),
+        iterations: ctx.iteration,
+        files: ctx.generatedFiles,
+        testFiles: ctx.testFiles,
+        totalTokens: tokenTracker.getTotalTokens(),
+        costUsd: tokenTracker.estimateCost(),
+        durationMs: Date.now() - startedAt,
+    });
+    stopLogging();
 
     printWorkflowSummary(ctx);
     if (showSummary) {

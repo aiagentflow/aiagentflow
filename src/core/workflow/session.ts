@@ -90,6 +90,11 @@ export function saveSession(
     return id;
 }
 
+/** Path of a session's event log (NDJSON, one run event per line). */
+export function getEventLogPath(projectRoot: string, sessionId: string): string {
+    return join(getSessionsDir(projectRoot), `${sessionId}.events.ndjson`);
+}
+
 /**
  * Load a workflow session from disk.
  */

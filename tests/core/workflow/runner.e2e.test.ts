@@ -7,6 +7,8 @@ import { MockProvider, type MockStep } from '../../helpers/mock-provider.js';
 import { DEFAULT_CONFIG } from '../../../src/core/config/defaults.js';
 import { listSessions, saveSession } from '../../../src/core/workflow/session.js';
 import { createWorkflowContext } from '../../../src/core/workflow/engine.js';
+import { EventBus, readEventLog, type TimedRunEvent } from '../../../src/core/events.js';
+import { getEventLogPath } from '../../../src/core/workflow/session.js';
 import { setLogLevel, getLogLevel, LogLevel } from '../../../src/utils/logger.js';
 
 const holder = vi.hoisted(() => ({ provider: undefined as unknown }));
@@ -373,6 +375,39 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             const { ctx } = await runNamed('security-audit', [findings]);
             expect(ctx.status).toBe('failed');
             expect(ctx.verdicts?.security?.issues[0]).toMatchObject({ severity: 'critical', file: 'src/config.ts' });
+        });
+    });
+
+    describe('run events', () => {
+        it('emits a typed event stream and logs it per session', async () => {
+            dir = setupProject();
+            const events = new EventBus();
+            const seen: TimedRunEvent[] = [];
+            events.subscribe(e => seen.push(e));
+            holder.provider = new MockProvider([
+                PLAN,
+                { content: '', toolCalls: [{ name: 'write_file', input: { path: 'src/app.ts', content: 'export const app = 1;\n' } }] },
+                'Created src/app.ts.',
+                APPROVE, PASS, TESTS, PASS,
+            ]);
+
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Build', auto: true, streaming: false, isolation: 'inplace', showSummary: false, events });
+
+            const types = seen.map(e => e.type);
+            expect(types[0]).toBe('run.started');
+            expect(types.at(-1)).toBe('run.finished');
+            expect(seen.filter(e => e.type === 'step.started').map(e => (e as { step: string }).step))
+                .toEqual(['plan', 'implement', 'review', 'security', 'test', 'judge']);
+            expect(seen).toContainEqual(expect.objectContaining({ type: 'tool.called', step: 'implement', tool: 'write_file' }));
+            expect(seen).toContainEqual(expect.objectContaining({ type: 'check.finished', step: 'test', check: 'test', passed: true }));
+            expect(seen).toContainEqual(expect.objectContaining({ type: 'verdict', step: 'review', verdict: expect.objectContaining({ verdict: 'approve' }) }));
+            expect(seen.find(e => e.type === 'step.finished' && e.step === 'plan')).toMatchObject({ outcome: 'passed', usage: { promptTokens: 10 } });
+            expect(seen.at(-1)).toMatchObject({ type: 'run.finished', status: 'passed', files: ['src/app.ts'], iterations: 0 });
+
+            // The same events are in the session's event log
+            const sessionId = (seen[0] as { sessionId: string }).sessionId;
+            expect(readEventLog(getEventLogPath(dir, sessionId), 100).map(e => e.type)).toEqual(types);
+            expect(ctx.status).toBe('passed');
         });
     });
 });

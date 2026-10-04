@@ -29,7 +29,8 @@ import { parseAndWriteFiles } from './file-parser.js';
 import { runTests } from './test-runner.js';
 import { runLint, runFormat } from './lint-runner.js';
 import { requestApproval, requestStepReview, isApprovalGated } from './approval.js';
-import type { TokenTracker } from './token-tracker.js';
+import { costOf, type TokenTracker } from './token-tracker.js';
+import type { EventBus } from '../events.js';
 import { formatPolicyForAgent, type QAPolicy } from './qa-policy.js';
 import { formatContextForAgent, formatSourcesForAgent, type ContextDocument } from './context-loader.js';
 import { buildRepoMap } from './repo-map.js';
@@ -48,6 +49,8 @@ export interface ExecutorParams {
     auto: boolean;
     streaming: boolean;
     mcpRegistry?: McpRegistry;
+    /** Receives run events (steps, tools, checks, verdicts). */
+    events?: EventBus;
     /** Called after every step (crash recovery). */
     onStep?: (ctx: WorkflowContext) => void;
 }
@@ -90,6 +93,16 @@ export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowC
 
         if (result.rerun) continue;
         ctx = route(ctx, step, workflow, result);
+        const record = ctx.history.at(-1)!;
+        const usage = result.output?.usage;
+        params.events?.emit({
+            type: 'step.finished',
+            step: step.id,
+            agent: step.agent,
+            outcome: record.outcome,
+            ...(record.detail ? { detail: record.detail } : {}),
+            ...(usage ? { usage, costUsd: costOf({ model: config.agents[step.agent].model, ...usage }) } : {}),
+        });
         params.onStep?.(ctx);
 
         // Optional human checkpoint between steps
@@ -143,6 +156,7 @@ function route(ctx: WorkflowContext, step: WorkflowStep, workflow: WorkflowDefin
 async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorParams): Promise<StepResult> {
     const { config, projectRoot, auto, streaming } = p;
     const label = AGENT_ROLE_LABELS[step.agent];
+    p.events?.emit({ type: 'step.started', step: step.id, agent: step.agent });
     const spinner = ora(`Running ${step.id} (${step.agent})...`).start();
     const changes = new ChangeSet();
 
@@ -150,6 +164,10 @@ async function runStep(step: WorkflowStep, ctx: WorkflowContext, p: ExecutorPara
         tools: p.mcpRegistry?.toolsFor(step.agent),
         changes,
         maxTurns: step.maxTurns,
+        onToolResult: p.events ? (call, result) => {
+            p.events!.emit({ type: 'tool.called', step: step.id, agent: step.agent, tool: call.name, input: call.input });
+            p.events!.emit({ type: 'tool.result', step: step.id, agent: step.agent, tool: call.name, isError: result.isError === true });
+        } : undefined,
         // Pause the spinner while asking, so the prompt stays readable
         confirmCommand: auto ? undefined : async (command) => {
             const spinning = spinner.isSpinning;
@@ -237,6 +255,7 @@ function applyOutput(ctx: WorkflowContext, step: WorkflowStep, output: AgentOutp
         case 'judge': {
             const verdict = requireVerdict(output, step.agent);
             logIssueCounts(AGENT_ROLE_LABELS[step.agent], verdict);
+            p.events?.emit({ type: 'verdict', step: step.id, agent: step.agent, verdict });
             let next: WorkflowContext = { ...ctx, verdicts: { ...ctx.verdicts, [step.agent]: verdict } };
             if (step.agent === 'reviewer') next = { ...next, reviewFeedback: content };
             if (step.agent === 'security') next = { ...next, securityFindings: content };
@@ -262,6 +281,7 @@ async function runChecks(ctx: WorkflowContext, step: WorkflowStep, p: ExecutorPa
 
         if (check === 'lint' && config.workflow.lintCommand) {
             const lint = await runLint(projectRoot, config.workflow.lintCommand);
+            p.events?.emit({ type: 'check.finished', step: step.id, check: 'lint', passed: lint.passed });
             if (lint.passed) continue;
             if (isRepeatedFailure(lint.output, ctx.previousFailures)) {
                 logger.warn('Repeated lint failure — the fixer could not resolve these lint errors. Continuing.');
@@ -274,6 +294,7 @@ async function runChecks(ctx: WorkflowContext, step: WorkflowStep, p: ExecutorPa
         if (check === 'test' && config.workflow.autoRunTests) {
             const command = config.workflow.testCommand ?? buildTestCommand(config.project.testFramework, projectRoot);
             const tests = await runTests(projectRoot, command);
+            p.events?.emit({ type: 'check.finished', step: step.id, check: 'test', passed: tests.passed });
             if (tests.passed) {
                 ctx = { ...ctx, testFailures: undefined };
                 continue;
