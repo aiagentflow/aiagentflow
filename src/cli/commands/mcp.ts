@@ -13,7 +13,9 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { McpClient } from '../../mcp/client.js';
 import { loadConfig, configExists } from '../../core/config/manager.js';
-import { logger } from '../../utils/logger.js';
+import { logger, setLogLevel, LogLevel } from '../../utils/logger.js';
+import { claimStdout } from '../../utils/jsonrpc.js';
+import { McpServer } from '../../mcp/server.js';
 
 const mcpList = new Command('list')
     .description('List all configured MCP servers and their tools')
@@ -115,7 +117,19 @@ const mcpTest = new Command('test')
         }
     });
 
+const mcpServe = new Command('serve')
+    .description('Run aiagentflow as an MCP server on stdio, so other agents can call it as tools')
+    .option('--max-cost <usd>', 'Most a single run or review may spend, in USD (default: 5)', parseFloat, 5)
+    .action(async (options: { maxCost: number }) => {
+        // stdout carries protocol messages only: everything else goes to stderr
+        const send = claimStdout();
+        setLogLevel(LogLevel.Warn);
+        const server = new McpServer(send, { projectRoot: process.cwd(), maxCostUsd: options.maxCost });
+        await server.listen(process.stdin);
+    });
+
 export const mcpCommand = new Command('mcp')
     .description('Manage and debug MCP server configuration')
     .addCommand(mcpList)
-    .addCommand(mcpTest);
+    .addCommand(mcpTest)
+    .addCommand(mcpServe);
