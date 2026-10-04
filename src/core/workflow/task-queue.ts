@@ -177,7 +177,7 @@ async function runParallel(queue: QueuedTask[], params: RunnerParams): Promise<v
 // ── Task executor ──
 
 async function executeTask(item: QueuedTask, params: Omit<RunnerParams, 'stopOnFailure' | 'parallel'>): Promise<void> {
-    const { projectRoot, auto, mode, contextPaths, dryRun, isolation, budgetTracker } = params;
+    const { projectRoot, auto, mode, contextPaths, dryRun, isolation } = params;
     item.status = 'running';
     const startTime = Date.now();
 
