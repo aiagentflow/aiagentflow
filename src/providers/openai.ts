@@ -1,26 +1,15 @@
 /**
  * OpenAI provider adapter.
  *
- * Uses the OpenAI Chat Completions API directly via fetch() — no SDK dependency.
- * Matches the existing pattern established by the Anthropic adapter.
+ * Thin subclass of the shared OpenAI-compatible adapter.
  *
- * Dependency direction: openai.ts → providers/types.ts, core/errors.ts
+ * Dependency direction: openai.ts → openai-compatible.ts, core/errors.ts
  * Used by: providers/registry.ts
  */
 
 import { ProviderError } from '../core/errors.js';
-import type {
-    LLMProvider,
-    ChatMessage,
-    ChatOptions,
-    ChatResponse,
-    ChatChunk,
-    ModelInfo,
-    TokenUsage,
-} from './types.js';
-import { logger } from '../utils/logger.js';
-import { fetchWithRetry, PROVIDER_TIMEOUT_MS } from './provider-errors.js';
-import { normalizeStopReason, toPlainMessages } from './messages.js';
+import { OpenAICompatibleProvider, withV1 } from './openai-compatible.js';
+import { PROVIDER_TIMEOUT_MS } from './provider-errors.js';
 
 /** Configuration required to create an OpenAI provider. */
 export interface OpenAIProviderConfig {
@@ -33,232 +22,25 @@ export interface OpenAIProviderConfig {
 const DEFAULTS = {
     baseUrl: 'https://api.openai.com',
     model: 'gpt-4o-mini',
-    maxTokens: 4096,
 } as const;
 
-/**
- * OpenAI provider implementation.
- *
- * Implements the LLMProvider interface using the OpenAI Chat Completions API.
- * OpenAI supports `system` role natively in the messages array.
- */
-export class OpenAIProvider implements LLMProvider {
+export class OpenAIProvider extends OpenAICompatibleProvider {
     public readonly name = 'openai' as const;
-    private readonly apiKey: string;
-    private readonly baseUrl: string;
-    private readonly organization?: string;
 
     constructor(config: OpenAIProviderConfig) {
         if (!config.apiKey) {
             throw new ProviderError('OpenAI API key is required', { provider: 'openai' });
         }
-        this.apiKey = config.apiKey;
-        this.baseUrl = config.baseUrl ?? DEFAULTS.baseUrl;
-        this.organization = config.organization;
-    }
-
-    /**
-     * Send a non-streaming chat completion request.
-     */
-    async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
-        const apiMessages = this.prepareMessages(messages, options);
-        const model = options?.model ?? DEFAULTS.model;
-
-        const body: Record<string, unknown> = {
-            model,
-            messages: apiMessages,
-        };
-
-        if (options?.maxTokens !== undefined) {
-            body.max_tokens = options.maxTokens;
-        }
-        if (options?.temperature !== undefined) {
-            body.temperature = options.temperature;
-        }
-        if (options?.stopSequences?.length) {
-            body.stop = options.stopSequences;
-        }
-
-        logger.debug(`OpenAI chat request: model=${model}, messages=${apiMessages.length}`);
-
-        const response = await this.request('/v1/chat/completions', body);
-
-        const choice = (response.choices as Array<Record<string, unknown>>)?.[0];
-        const message = choice?.message as Record<string, unknown> | undefined;
-        const content = (message?.content as string) ?? '';
-        const usage = this.extractUsage(response);
-
-        return {
-            content,
-            model: (response.model as string) ?? model,
-            usage,
-            finishReason: (choice?.finish_reason as string) ?? 'unknown',
-            stopReason: normalizeStopReason(choice?.finish_reason as string | undefined),
-            toolCalls: [],
-        };
-    }
-
-    /**
-     * Send a streaming chat completion request.
-     */
-    async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<ChatChunk> {
-        const apiMessages = this.prepareMessages(messages, options);
-        const model = options?.model ?? DEFAULTS.model;
-
-        const body: Record<string, unknown> = {
-            model,
-            messages: apiMessages,
-            stream: true,
-        };
-
-        if (options?.maxTokens !== undefined) {
-            body.max_tokens = options.maxTokens;
-        }
-        if (options?.temperature !== undefined) {
-            body.temperature = options.temperature;
-        }
-
-        const response = await fetchWithRetry(
-            `${this.baseUrl}/v1/chat/completions`,
-            { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(body) },
-            { provider: 'openai', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
-        );
-
-        if (!response.body) {
-            throw new ProviderError('OpenAI response has no body', { provider: 'openai' });
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() ?? '';
-
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    const data = line.slice(6).trim();
-                    if (data === '[DONE]') {
-                        yield { content: '', done: true };
-                        return;
-                    }
-
-                    try {
-                        const event = JSON.parse(data);
-                        const delta = event.choices?.[0]?.delta;
-                        if (delta?.content) {
-                            yield { content: delta.content, done: false };
-                        }
-                        if (event.choices?.[0]?.finish_reason) {
-                            yield { content: '', done: true };
-                            return;
-                        }
-                    } catch {
-                        // Skip unparseable lines
-                    }
-                }
-            }
-        } finally {
-            reader.releaseLock();
-        }
-
-        yield { content: '', done: true };
-    }
-
-    /**
-     * List available models from the OpenAI API.
-     */
-    async listModels(): Promise<ModelInfo[]> {
-        const response = await fetchWithRetry(
-            `${this.baseUrl}/v1/models`,
-            { method: 'GET', headers: this.getHeaders() },
-            { provider: 'openai', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
-        );
-
-        const body = await response.json() as { data?: Array<{ id: string }> };
-        const models = body.data ?? [];
-
-        return models.map((m) => ({
-            id: m.id,
-            name: m.id,
-            provider: 'openai' as const,
-        }));
-    }
-
-    /**
-     * Validate that the OpenAI API connection is working.
-     */
-    async validateConnection(): Promise<boolean> {
-        try {
-            const response = await fetch(`${this.baseUrl}/v1/models`, {
-                method: 'GET',
-                headers: this.getHeaders(),
-            });
-
-            return response.ok;
-        } catch {
-            return false;
-        }
-    }
-
-    // ── Private helpers ──
-
-    private getHeaders(): Record<string, string> {
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`,
-        };
-
-        if (this.organization) {
-            headers['OpenAI-Organization'] = this.organization;
-        }
-
-        return headers;
-    }
-
-    private async request(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-        const response = await fetchWithRetry(
-            `${this.baseUrl}${path}`,
-            { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(body) },
-            { provider: 'openai', baseUrl: this.baseUrl, timeoutMs: PROVIDER_TIMEOUT_MS },
-        );
-
-        return response.json() as Promise<Record<string, unknown>>;
-    }
-
-    /**
-     * Prepare messages for the OpenAI API.
-     * OpenAI supports system role natively in the messages array.
-     */
-    private prepareMessages(
-        messages: ChatMessage[],
-        options?: ChatOptions,
-    ): Array<{ role: string; content: string }> {
-        const apiMessages: Array<{ role: string; content: string }> = [];
-
-        if (options?.systemPrompt) {
-            apiMessages.push({ role: 'system', content: options.systemPrompt });
-        }
-
-        for (const msg of toPlainMessages(messages)) {
-            apiMessages.push({ role: msg.role, content: msg.content });
-        }
-
-        return apiMessages;
-    }
-
-    private extractUsage(response: Record<string, unknown>): TokenUsage {
-        const usage = response.usage as Record<string, number> | undefined;
-        return {
-            promptTokens: usage?.prompt_tokens ?? 0,
-            completionTokens: usage?.completion_tokens ?? 0,
-            totalTokens: usage?.total_tokens ?? 0,
-        };
+        super({
+            name: 'openai',
+            label: 'OpenAI',
+            baseUrl: withV1(config.baseUrl ?? DEFAULTS.baseUrl),
+            defaultModel: DEFAULTS.model,
+            timeoutMs: PROVIDER_TIMEOUT_MS,
+            headers: {
+                Authorization: `Bearer ${config.apiKey}`,
+                ...(config.organization ? { 'OpenAI-Organization': config.organization } : {}),
+            },
+        });
     }
 }
