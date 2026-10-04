@@ -13,6 +13,7 @@ import { Box, Text } from 'ink';
 import { listWorktrees, type WorktreeEntry } from '../../git/worktree.js';
 import { listSessions, type SessionData } from '../../core/workflow/session.js';
 import { loadConfig, configExists } from '../../core/config/manager.js';
+import { runLabel, type RunStatus } from '../../core/workflow/engine.js';
 
 interface RunRow {
     worktree: WorktreeEntry;
@@ -21,24 +22,18 @@ interface RunRow {
     tokens: number;
 }
 
-const STATUS_ICONS: Record<string, string> = {
-    qa_approved: '✓',
-    complete: '✓',
+const STATUS_ICONS: Record<RunStatus | 'unknown', string> = {
+    passed: '✓',
     failed: '✗',
-    plan_pending: '⏸',
-    awaiting_approval: '⏸',
+    running: '⏵',
+    unknown: '?',
 };
-
-function statusIcon(state: string): string {
-    return STATUS_ICONS[state] ?? '⏵';
-}
 
 type ColorName = 'green' | 'red' | 'blue' | 'yellow' | 'gray';
 
-function statusColor(state: string): ColorName {
-    if (state === 'qa_approved' || state === 'complete') return 'green';
-    if (state === 'failed') return 'red';
-    if (state === 'plan_pending' || state === 'awaiting_approval') return 'blue';
+function statusColor(status: RunStatus | 'unknown'): ColorName {
+    if (status === 'passed') return 'green';
+    if (status === 'failed') return 'red';
     return 'yellow';
 }
 
@@ -122,7 +117,7 @@ export function RunsList({ projectRoot }: Props): React.JSX.Element {
             <Box paddingLeft={2}>
                 <Text color="gray">{''.padEnd(3)}</Text>
                 <Text color="gray">{'Branch'.padEnd(42)}</Text>
-                <Text color="gray">{'State'.padEnd(22)}</Text>
+                <Text color="gray">{'Status'.padEnd(22)}</Text>
                 <Text color="gray">{'Age'.padEnd(8)}</Text>
                 <Text color="gray">Tokens</Text>
             </Box>
@@ -131,11 +126,11 @@ export function RunsList({ projectRoot }: Props): React.JSX.Element {
             </Box>
 
             {rows.map(row => {
-                const state = row.session?.context.state ?? 'unknown';
-                const color = statusColor(state);
-                const icon = statusIcon(state);
+                const status = row.session?.context.status ?? 'unknown';
+                const color = statusColor(status);
+                const icon = STATUS_ICONS[status];
                 const branch = row.worktree.branch.slice(0, 40).padEnd(42);
-                const statePadded = state.padEnd(22);
+                const statePadded = (row.session ? runLabel(row.session.context) : 'unknown').padEnd(22);
                 const age = formatAge(row.ageMs).padEnd(8);
                 const tokStr = row.tokens > 0 ? row.tokens.toLocaleString() : '—';
 

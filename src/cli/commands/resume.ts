@@ -36,7 +36,7 @@ export const resumeCommand = new Command('resume')
                 streaming: options.stream,
             });
 
-            if (result.state === 'failed') {
+            if (result.status === 'failed') {
                 process.exit(1);
             }
         } catch (err) {

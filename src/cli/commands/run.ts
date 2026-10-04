@@ -137,12 +137,12 @@ export const runCommand = new Command('run')
                 showSummary: options.summary !== false,
             });
 
-            if (result.state === 'failed') {
+            if (result.status === 'failed') {
                 process.exit(1);
             }
 
-            // Auto-open a PR for --issue runs if QA passed
-            if (options.issue && result.state === 'qa_approved' && isolation === 'worktree') {
+            // Auto-open a PR for --issue runs that passed
+            if (options.issue && result.status === 'passed' && isolation === 'worktree') {
                 const issueNum = options.issue;
                 try {
                     await openPR({
