@@ -9,6 +9,7 @@
  */
 
 import type { AppConfig } from './types.js';
+import { DEFAULT_DENY } from '../../tools/permissions.js';
 
 /**
  * Default agent role config — uses Ollama with a local model.
@@ -66,6 +67,14 @@ export const DEFAULT_CONFIG: AppConfig = {
         autoRunTests: true,
         autoCommit: false,
         autoCommitMessage: 'ai: {task}',
+    },
+
+    permissions: {
+        mode: 'ask' as const,
+        allow: [],
+        deny: [...DEFAULT_DENY],
+        tools: {},
+        commandTimeoutMs: 120_000,
     },
 
     mcpServers: {},
