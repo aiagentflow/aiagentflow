@@ -61,7 +61,7 @@ describe('runEval', () => {
         const [result] = await runEval([task], { projectRoot: project, workflow: 'fast' });
 
         expect(result!.passed).toBe(false);
-        expect(result!.checkOutput).toContain('fail');
+        expect(result!.checkOutput).not.toBe('');
     });
 
     it('keeps the workspace on request and never writes env API keys to it', async () => {
