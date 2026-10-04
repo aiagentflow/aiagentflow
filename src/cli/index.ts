@@ -36,7 +36,7 @@ const program = new Command();
 program
     .name('aiagentflow')
     .description('AI Engineering Workflow Orchestrator — multi-agent development automation')
-    .version('1.4.0');
+    .version('2.0.0-beta.0');
 
 // Register commands
 program.addCommand(initCommand);
