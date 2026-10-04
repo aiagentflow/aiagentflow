@@ -142,6 +142,7 @@ More: [docs/headless.md](docs/headless.md).
 | `plan <docs...>` | Turn specs into a task list for `--batch` |
 | `chat <agent>` | Talk to one agent |
 | `eval` | Measure a workflow on tasks with hidden tests |
+| `acp` | Run as an [ACP](docs/acp.md) server for editors such as Zed |
 | `memory list\|show\|edit\|rm\|clear` | Manage agent memory |
 | `mcp list\|test` | MCP servers |
 | `plugin list\|install\|remove` | Plugins |
