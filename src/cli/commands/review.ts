@@ -29,6 +29,7 @@ import { enableJsonOutput, OUTPUT_FORMATS, type OutputFormat } from '../utils/js
 import { ExitCode, exitCodeForError, exitCodeForRun } from '../utils/exit-codes.js';
 import { addBudgetOptions, budgetFromFlags, type BudgetFlags } from '../utils/run-options.js';
 import { logger } from '../../utils/logger.js';
+import type { EventBus } from '../../core/events.js';
 
 /** Diffs larger than this are truncated in the prompt; agents can still read the files. */
 const MAX_DIFF_CHARS = 120_000;
@@ -43,6 +44,8 @@ export interface ReviewCommandOptions extends BudgetFlags {
     report?: string;
     output: OutputFormat;
     stream: boolean;
+    /** Receives run events (when not using --output json). */
+    events?: EventBus;
 }
 
 export const reviewCommand = addBudgetOptions(new Command('review')
@@ -62,6 +65,22 @@ export const reviewCommand = addBudgetOptions(new Command('review')
 
 /** Run a review and return the process exit code. */
 export async function runReview(options: ReviewCommandOptions, projectRoot = process.cwd()): Promise<number> {
+    return (await reviewChanges(options, projectRoot)).exitCode;
+}
+
+/** Outcome of a review: the exit code and, when a review ran, its markdown report. */
+export interface ReviewOutcome {
+    exitCode: number;
+    report?: string;
+}
+
+/** Run a review: print the report (text mode), post comments, and decide the outcome. */
+export async function reviewChanges(options: ReviewCommandOptions, projectRoot = process.cwd()): Promise<ReviewOutcome> {
+    const outcome = await reviewInner(options, projectRoot);
+    return typeof outcome === 'number' ? { exitCode: outcome } : outcome;
+}
+
+async function reviewInner(options: ReviewCommandOptions, projectRoot: string): Promise<number | ReviewOutcome> {
     if (!configExists(projectRoot)) {
         logger.error('No configuration found. Run "aiagentflow init" first.');
         return ExitCode.Config;
@@ -77,7 +96,7 @@ export async function runReview(options: ReviewCommandOptions, projectRoot = pro
         return ExitCode.Config;
     }
 
-    const events = options.output === 'json' ? enableJsonOutput() : undefined;
+    const events = options.output === 'json' ? enableJsonOutput() : options.events;
     const source: DiffSource = options.pr ? { kind: 'pr', number: options.pr }
         : options.diff ? { kind: 'range', range: options.diff }
             : options.staged ? { kind: 'staged' }
@@ -87,7 +106,7 @@ export async function runReview(options: ReviewCommandOptions, projectRoot = pro
         const diff = await getDiff(source, projectRoot);
         if (!diff.diff.trim()) {
             logger.info(`Nothing to review: no ${diff.label}.`);
-            return ExitCode.Success;
+            return { exitCode: ExitCode.Success, report: `Nothing to review: no ${diff.label}.` };
         }
         logger.info(`Reviewing ${diff.label}: ${diff.files.length} file(s)`);
 
@@ -122,7 +141,7 @@ export async function runReview(options: ReviewCommandOptions, projectRoot = pro
 
         const blocking = blockingFindings(collectFindings(ctx.verdicts), options.failOn);
         // A custom workflow's own gates can also fail the review
-        return blocking.length > 0 || ctx.status === 'failed' ? ExitCode.Failed : ExitCode.Success;
+        return { exitCode: blocking.length > 0 || ctx.status === 'failed' ? ExitCode.Failed : ExitCode.Success, report };
     } catch (err) {
         logger.error(err instanceof Error ? err.message : String(err));
         return exitCodeForError(err);

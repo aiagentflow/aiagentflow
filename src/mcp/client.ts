@@ -57,7 +57,8 @@ export class McpClient extends EventEmitter {
         });
 
         // Send initialized notification (no response expected)
-        this.send({ jsonrpc: '2.0', id: 0, method: 'notifications/initialized' });
+        // A notification: it must not carry an id
+        this.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
         this.ready = true;
     }
 
