@@ -1,0 +1,8 @@
+id: js-parse-duration
+language: javascript
+testFramework: node:test
+prompt: |
+  Implement `parseDuration(text)` in src/duration.js. It parses strings like "90s", "15m", "2h", "1h30m", and "1h 30m 5s" into milliseconds.
+  It throws a RangeError for empty strings, unknown units, or anything else that is not a valid duration.
+test: node --test test/*.test.js
+check: node --test hidden/*.test.js

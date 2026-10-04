@@ -1,0 +1,7 @@
+id: py-csv-quoted-fields
+language: python
+testFramework: unittest
+prompt: |
+  `parse_line(line)` in app/csvline.py splits on every comma, which breaks quoted fields. Make it follow CSV quoting: commas inside double quotes are part of the field, and "" inside a quoted field is a literal quote. Do not use the csv module.
+test: python3 -m unittest discover -s tests -t .
+check: python3 -m unittest discover -s hidden -t .

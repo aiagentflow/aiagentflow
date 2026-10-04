@@ -1,0 +1,7 @@
+id: js-paginate-off-by-one
+language: javascript
+testFramework: node:test
+prompt: |
+  `paginate(items, page, pageSize)` in src/paginate.js returns the wrong slice: page 1 should be the first page. Fix the bug.
+test: node --test test/*.test.js
+check: node --test hidden/*.test.js

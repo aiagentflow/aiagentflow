@@ -1,0 +1,7 @@
+id: js-lru-cache
+language: javascript
+testFramework: node:test
+prompt: |
+  Implement the `LRUCache` class in src/lru.js: `new LRUCache(capacity)`, `get(key)` (returns undefined when missing and marks the key as recently used), `set(key, value)` (evicts the least recently used entry when full), and a `size` getter.
+test: node --test test/*.test.js
+check: node --test hidden/*.test.js

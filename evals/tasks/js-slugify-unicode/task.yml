@@ -1,0 +1,7 @@
+id: js-slugify-unicode
+language: javascript
+testFramework: node:test
+prompt: |
+  `slugify` in src/slug.js breaks on accented characters and repeated separators. Make it strip accents ("Crème Brûlée" → "creme-brulee"), collapse runs of non-alphanumeric characters into a single "-", and trim leading and trailing dashes.
+test: node --test test/*.test.js
+check: node --test hidden/*.test.js

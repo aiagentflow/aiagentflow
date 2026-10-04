@@ -1,0 +1,7 @@
+id: py-roman-numerals
+language: python
+testFramework: unittest
+prompt: |
+  Implement `to_roman(n)` and `from_roman(text)` in app/roman.py for 1 to 3999. Both raise ValueError for out-of-range numbers or invalid numerals (for example "IIII" or "VX").
+test: python3 -m unittest discover -s tests -t .
+check: python3 -m unittest discover -s hidden -t .

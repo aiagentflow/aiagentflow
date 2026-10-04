@@ -1,0 +1,7 @@
+id: js-event-emitter-once
+language: javascript
+testFramework: node:test
+prompt: |
+  Add a `once(event, listener)` method to the Emitter in src/emitter.js: the listener runs on the next emit only. `off(event, listener)` must also remove a listener registered with `once` before it fires.
+test: node --test test/*.test.js
+check: node --test hidden/*.test.js
