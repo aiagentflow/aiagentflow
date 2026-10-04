@@ -22,7 +22,7 @@ export class TesterAgent extends BaseAgent {
     }
 
     protected buildSystemPrompt(): string {
-        return loadAgentPrompt(this.projectRoot, 'tester');
+        return loadAgentPrompt(this.projectRoot, 'tester', { legacyFileBlocks: this.legacyFileBlocks });
     }
 
     protected buildUserPrompt(input: AgentInput): string {

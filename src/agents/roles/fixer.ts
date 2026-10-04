@@ -22,7 +22,7 @@ export class FixerAgent extends BaseAgent {
     }
 
     protected buildSystemPrompt(): string {
-        return loadAgentPrompt(this.projectRoot, 'fixer');
+        return loadAgentPrompt(this.projectRoot, 'fixer', { legacyFileBlocks: this.legacyFileBlocks });
     }
 
     protected buildUserPrompt(input: AgentInput): string {

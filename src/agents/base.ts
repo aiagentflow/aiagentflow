@@ -53,6 +53,8 @@ export interface AgentOptions {
     tools?: ToolRegistry;
     /** Max model turns that may request tools (default: DEFAULT_MAX_TURNS). */
     maxTurns?: number;
+    /** Use the v1 prompts where code-writing agents return `FILE:` blocks. */
+    legacyFileBlocks?: boolean;
 }
 
 /** One model turn, reduced to what the tool loop needs. */
@@ -79,6 +81,7 @@ export abstract class BaseAgent {
     protected readonly maxTokens: number;
     protected readonly tools?: ToolRegistry;
     protected readonly maxTurns: number;
+    protected readonly legacyFileBlocks: boolean;
     /** Formatted memory section prepended to the system prompt. Set by factory. */
     memorySection = '';
 
@@ -90,6 +93,7 @@ export abstract class BaseAgent {
         this.maxTokens = options.maxTokens ?? 4096;
         this.tools = options.tools && options.tools.size > 0 ? options.tools : undefined;
         this.maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+        this.legacyFileBlocks = options.legacyFileBlocks ?? false;
     }
 
     /**

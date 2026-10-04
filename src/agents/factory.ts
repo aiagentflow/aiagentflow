@@ -12,6 +12,10 @@ import type { AgentRole } from './types.js';
 import type { BaseAgent } from './base.js';
 import type { AppConfig } from '../core/config/types.js';
 import { ToolRegistry, type Tool } from '../tools/registry.js';
+import { createBuiltinTools, commandPolicyFromConfig } from '../tools/builtin.js';
+import type { ChangeSet } from '../tools/repo.js';
+import type { ConfirmAnswer } from '../tools/command.js';
+import { buildTestCommand } from '../utils/package-manager.js';
 import { createProvider } from '../providers/registry.js';
 import { ArchitectAgent } from './roles/architect.js';
 import { CoderAgent } from './roles/coder.js';
@@ -29,13 +33,18 @@ export interface AgentFactoryOptions {
     tools?: Tool[];
     /** When true, the remember tool is not added even for eligible roles. */
     memoryDisabled?: boolean;
+    /** Records files the agent writes through edit_file / write_file. */
+    changes?: ChangeSet;
+    /** Interactive approval for commands that need it. Omit for non-interactive runs. */
+    confirmCommand?: (command: string) => Promise<ConfirmAnswer>;
 }
 
 /**
  * Create an agent instance for the specified role using the app config.
  * Automatically:
  *   - Loads and injects project memories relevant to this role
- *   - Builds the agent's ToolRegistry: extra tools plus `remember` for eligible roles
+ *   - Builds the agent's ToolRegistry: built-in repo/command tools allowed for the role
+ *     (none in legacyFileBlocks mode), extra tools, and `remember` for eligible roles
  *
  * @param role - Which agent to create
  * @param config - Full application config
@@ -52,7 +61,20 @@ export function createAgent(
     const provider = createProvider(agentConfig.provider, config.providers);
 
     const memoryDisabled = factoryOpts?.memoryDisabled ?? false;
-    const tools = new ToolRegistry(factoryOpts?.tools ?? []);
+    const legacyFileBlocks = config.workflow.legacyFileBlocks;
+    const builtin = legacyFileBlocks ? [] : createBuiltinTools(role, {
+        root: projectRoot,
+        changes: factoryOpts?.changes,
+        policy: commandPolicyFromConfig(config.permissions, [
+            config.workflow.testCommand ?? buildTestCommand(config.project.testFramework, projectRoot),
+            config.workflow.lintCommand,
+            config.workflow.formatCommand,
+        ]),
+        allowedTools: config.permissions.tools[role],
+        commandTimeoutMs: config.permissions.commandTimeoutMs,
+        confirm: factoryOpts?.confirmCommand,
+    });
+    const tools = new ToolRegistry([...builtin, ...(factoryOpts?.tools ?? [])]);
     if (!memoryDisabled && REMEMBER_ELIGIBLE_ROLES.has(role)) {
         tools.register(createRememberTool(role, projectRoot));
     }
@@ -63,6 +85,7 @@ export function createAgent(
         maxTokens: agentConfig.maxTokens,
         maxTurns: agentConfig.maxTurns,
         tools,
+        legacyFileBlocks,
     };
 
     let agent: BaseAgent;
