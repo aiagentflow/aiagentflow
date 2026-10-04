@@ -10,7 +10,8 @@
  * Used by: all agent implementations
  */
 
-import type { LLMProvider, ChatMessage, ChatOptions, ToolCall, ToolResult } from '../providers/types.js';
+import type { LLMProvider, ChatMessage, ChatOptions, ToolCall, ToolResult, TokenUsage } from '../providers/types.js';
+import { addUsage, EMPTY_USAGE } from '../providers/messages.js';
 import type { AgentRole, StreamCallbacks } from './types.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { ProviderError } from '../core/errors.js';
@@ -36,8 +37,10 @@ export interface AgentOutput {
     content: string;
     /** Which agent produced this output. */
     role: AgentRole;
-    /** Token usage for this agent call. */
+    /** Total tokens for this agent call (usage.totalTokens). */
     tokensUsed: number;
+    /** Token usage summed over every model turn, as reported by the provider. */
+    usage: TokenUsage;
     /** Whether the agent considers its task done successfully. */
     success: boolean;
     /** Optional metadata from the agent. */
@@ -61,7 +64,7 @@ export interface AgentOptions {
 interface TurnResult {
     content: string;
     toolCalls: readonly ToolCall[];
-    tokens: number;
+    usage: TokenUsage;
 }
 
 /**
@@ -106,13 +109,13 @@ export abstract class BaseAgent {
         logger.info(`${label} starting...`);
 
         try {
-            const { content, tokens } = await this.runLoop(input, async (messages, options) => {
+            const { content, usage } = await this.runLoop(input, async (messages, options) => {
                 const response = await this.provider.chat(messages, options);
-                return { content: response.content, toolCalls: response.toolCalls, tokens: response.usage.totalTokens };
+                return { content: response.content, toolCalls: response.toolCalls, usage: response.usage };
             });
 
-            logger.success(`${label} complete (${tokens} tokens)`);
-            return { content: this.parseResponse(content), role: this.role, tokensUsed: tokens, success: true };
+            logger.success(`${label} complete (${usage.totalTokens} tokens)`);
+            return { content: this.parseResponse(content), role: this.role, tokensUsed: usage.totalTokens, usage, success: true };
         } catch (err) {
             if (err instanceof ProviderError) throw err;
             throw new ProviderError(
@@ -134,10 +137,12 @@ export abstract class BaseAgent {
         logger.info(`${label} starting (streaming)...`);
 
         try {
-            const { content, tokens } = await this.runLoop(input, async (messages, options) => {
+            const { content, usage } = await this.runLoop(input, async (messages, options) => {
                 let text = '';
+                let reported: TokenUsage | undefined;
                 const toolCalls: ToolCall[] = [];
                 for await (const chunk of this.provider.stream(messages, options)) {
+                    if (chunk.usage) reported = chunk.usage;
                     if (chunk.content) {
                         text += chunk.content;
                         callbacks?.onChunk?.(chunk.content);
@@ -147,9 +152,13 @@ export abstract class BaseAgent {
                         callbacks?.onToolCall?.(call);
                     }
                 }
-                // Estimate: ~4 chars per token
-                // TODO: use provider-reported usage for streams
-                return { content: text, toolCalls, tokens: Math.ceil(text.length / 4) };
+                // Fall back to a rough estimate (~4 chars per token) only if the stream reported nothing
+                const estimated = Math.ceil(text.length / 4);
+                return {
+                    content: text,
+                    toolCalls,
+                    usage: reported ?? { promptTokens: 0, completionTokens: estimated, totalTokens: estimated },
+                };
             });
 
             callbacks?.onComplete?.(content);
@@ -162,8 +171,8 @@ export abstract class BaseAgent {
                 return this.execute(input);
             }
 
-            logger.success(`${label} complete (~${tokens} tokens)`);
-            return { content, role: this.role, tokensUsed: tokens, success: true };
+            logger.success(`${label} complete (${usage.totalTokens} tokens)`);
+            return { content, role: this.role, tokensUsed: usage.totalTokens, usage, success: true };
         } catch (err) {
             logger.warn(`${label} streaming failed, falling back to non-streaming`);
             logger.debug(`Stream error: ${err instanceof Error ? err.message : String(err)}`);
@@ -207,7 +216,7 @@ export abstract class BaseAgent {
     private async runLoop(
         input: AgentInput,
         turn: (messages: ChatMessage[], options: ChatOptions) => Promise<TurnResult>,
-    ): Promise<{ content: string; tokens: number }> {
+    ): Promise<{ content: string; usage: TokenUsage }> {
         const systemPrompt = this.memorySection
             ? `${this.memorySection}\n\n${this.buildSystemPrompt()}`
             : this.buildSystemPrompt();
@@ -220,15 +229,15 @@ export abstract class BaseAgent {
             ...(this.tools ? { tools: this.tools.definitions } : {}),
         };
 
-        let tokens = 0;
+        let usage = EMPTY_USAGE;
         let reminded = false;
         for (let i = 0; i < this.maxTurns; i++) {
             const result = await turn(messages, options);
-            tokens += result.tokens;
+            usage = addUsage(usage, result.usage);
 
             if (result.toolCalls.length === 0 || !this.tools) {
                 const reminder = reminded ? undefined : this.completionReminder();
-                if (!reminder) return { content: result.content, tokens };
+                if (!reminder) return { content: result.content, usage };
                 reminded = true;
                 messages.push(
                     { role: 'assistant', content: result.content || '(no response)' },
@@ -242,7 +251,7 @@ export abstract class BaseAgent {
                 logger.debug(`${this.role} calling tool: ${call.name}`);
                 results.push(await this.tools.execute(call));
             }
-            if (this.isDone()) return { content: result.content, tokens };
+            if (this.isDone()) return { content: result.content, usage };
             messages.push(
                 { role: 'assistant', content: result.content, toolCalls: result.toolCalls },
                 { role: 'tool', results },
@@ -251,6 +260,6 @@ export abstract class BaseAgent {
 
         logger.warn(`${AGENT_ROLE_LABELS[this.role]} hit the tool-call limit (${this.maxTurns}); requesting a final answer`);
         const final = await turn(messages, { ...options, tools: undefined });
-        return { content: final.content, tokens: tokens + final.tokens };
+        return { content: final.content, usage: addUsage(usage, final.usage) };
     }
 }

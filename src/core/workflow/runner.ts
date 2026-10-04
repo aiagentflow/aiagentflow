@@ -408,11 +408,7 @@ async function executeWorkflowLoop(params: WorkflowLoopParams): Promise<Workflow
                 lastOutput = output.content;
 
                 // Track token usage
-                tokenTracker.record(agentRole, agentConfig.model, {
-                    promptTokens: 0, // TODO: Get from provider response
-                    completionTokens: output.tokensUsed,
-                    totalTokens: output.tokensUsed,
-                });
+                tokenTracker.record(agentRole, agentConfig.model, output.usage);
 
                 // Plan-review gate: pause after architect if configured
                 if (!auto && agentRole === 'architect' && isApprovalGated('architect', config.workflow.approvalGates)) {
