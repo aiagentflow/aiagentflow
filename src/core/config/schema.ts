@@ -141,8 +141,12 @@ export const workflowConfigSchema = z.object({
     autoCreateBranch: z.boolean().default(true),
     /** Branch name prefix for auto-created branches. */
     branchPrefix: z.string().default('aiagentflow/'),
-    /** Run each task in an isolated git worktree. 'inplace' mutates the working directory directly. */
-    isolation: z.enum(['worktree', 'inplace']).default('inplace'),
+    /**
+     * 'worktree' (default) runs each task on its own branch in a separate git worktree, leaving
+     * your working directory untouched; 'inplace' edits the working directory directly.
+     * Projects that are not git repositories (or have no commits) always run in place.
+     */
+    isolation: z.enum(['worktree', 'inplace']).default('worktree'),
     /** When to merge the worktree branch back into the source branch. */
     autoMerge: z.enum(['never', 'on-judge-pass', 'always']).default('never'),
     /** Whether to auto-run tests after code generation. */

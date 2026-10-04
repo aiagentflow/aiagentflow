@@ -32,6 +32,7 @@ interface RunCommandOptions extends BudgetFlags {
     stream: boolean;
     dryRun?: boolean;
     isolate?: boolean;
+    inplace?: boolean;
     reviewPlan?: boolean;
     approvalGates?: string[];
     parallel?: number;
@@ -55,6 +56,7 @@ export const runCommand = addBudgetOptions(new Command('run')
     .option('--dry-run', 'Preview the workflow plan without executing agents')
     .option('--isolate', 'Run in an isolated git worktree (overrides config)')
     .option('--no-isolate', 'Run in-place without a worktree (overrides config)')
+    .option('--inplace', 'Same as --no-isolate: edit the working directory directly')
     .option('--review-plan', 'Pause for plan approval after the Architect runs')
     .option('--approval-gates <roles...>', 'Agent roles that require explicit approval (e.g. architect coder)')
     .option('--parallel <n>', 'Run batch tasks N at a time in parallel worktrees (batch mode only)', parseInt)
@@ -81,8 +83,8 @@ async function run(task: string, options: RunCommandOptions): Promise<number> {
     }
 
     const budget = budgetFromFlags(options);
-    // --isolate → 'worktree', --no-isolate → 'inplace', neither → config
-    const isolation = options.isolate === true ? 'worktree' : options.isolate === false ? 'inplace' : undefined;
+    // --isolate → 'worktree', --no-isolate / --inplace → 'inplace', neither → config (default: worktree)
+    const isolation = options.inplace || options.isolate === false ? 'inplace' : options.isolate === true ? 'worktree' : undefined;
 
     try {
         // Batch mode: read tasks from file

@@ -536,4 +536,50 @@ describe('runWorkflow end-to-end (MockProvider)', () => {
             expect(listSessions(dir)).toHaveLength(0);
         });
     });
+
+    describe('isolation default', () => {
+        it('runs in a git worktree by default and leaves the working directory untouched', async () => {
+            dir = setupProject();
+            // A worktree only contains committed files
+            execaSync('git', ['add', '-A'], { cwd: dir });
+            execaSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'fixture'], { cwd: dir });
+            holder.provider = new MockProvider([
+                PLAN,
+                { content: '', toolCalls: [{ name: 'write_file', input: { path: 'src/feature.ts', content: 'export const feature = 1;\n' } }] },
+                'Created src/feature.ts.',
+                APPROVE, PASS, TESTS, PASS,
+            ]);
+
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Add feature', auto: true, streaming: false, showSummary: false });
+
+            expect(ctx.failureReason).toBeUndefined();
+            expect(ctx.status).toBe('passed');
+            const session = listSessions(dir)[0]!;
+            expect(session.worktreeBranch).toMatch(/^aiagentflow\//);
+            expect(existsSync(join(session.worktreePath!, 'src', 'feature.ts'))).toBe(true);
+            expect(existsSync(join(dir, 'src', 'feature.ts'))).toBe(false);
+        });
+
+        it('warns that uncommitted changes are not in the worktree', async () => {
+            dir = setupProject();
+            const { logger } = await import('../../../src/utils/logger.js');
+            const warn = vi.spyOn(logger, 'warn');
+            holder.provider = new MockProvider([APPROVE, PASS]);
+
+            await runWorkflow({ projectRoot: dir, task: 'Review', workflow: 'review', auto: true, streaming: false, showSummary: false });
+
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('uncommitted change(s) are not in the worktree'));
+        });
+
+        it('runs in place when the project is not a git repository', async () => {
+            dir = setupProject();
+            rmSync(join(dir, '.git'), { recursive: true, force: true });
+            holder.provider = new MockProvider([PLAN, CODE, APPROVE, PASS, TESTS, PASS]);
+
+            const ctx = await runWorkflow({ projectRoot: dir, task: 'Build', auto: true, streaming: false, showSummary: false });
+
+            expect(ctx.status).toBe('passed');
+            expect(existsSync(join(dir, 'src', 'app.ts'))).toBe(true);
+        });
+    });
 });

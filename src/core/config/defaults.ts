@@ -63,7 +63,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         approvalGates: [] as ('architect' | 'coder' | 'reviewer' | 'security' | 'tester' | 'fixer' | 'judge')[],
         autoCreateBranch: true,
         branchPrefix: 'aiagentflow/',
-        isolation: 'inplace' as const,
+        isolation: 'worktree' as const,
         autoMerge: 'never' as const,
         autoRunTests: true,
         legacyFileBlocks: false,
