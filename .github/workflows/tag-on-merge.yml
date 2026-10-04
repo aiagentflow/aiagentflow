@@ -36,3 +36,11 @@ jobs:
           gh release create "v$VERSION" \
             --title "v$VERSION" \
             --generate-notes $PRERELEASE
+
+          # Stable releases also move the major tag (v2, v3, ...) so the GitHub Action
+          # can be used as aiagentflow/aiagentflow/action@v2
+          if [[ -z "$PRERELEASE" ]]; then
+            MAJOR="v${VERSION%%.*}"
+            git tag -f "$MAJOR"
+            git push -f origin "refs/tags/$MAJOR"
+          fi
