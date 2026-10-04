@@ -36,8 +36,8 @@ describe('transition', () => {
         expect(next.state).toBe('spec_created');
         expect(next.spec).toBe('the spec');
         expect(next.history).toHaveLength(1);
-        expect(next.history[0].from).toBe('idle');
-        expect(next.history[0].to).toBe('spec_created');
+        expect(next.history[0]!.from).toBe('idle');
+        expect(next.history[0]!.to).toBe('spec_created');
     });
 
     it('follows the happy path through all stages', () => {

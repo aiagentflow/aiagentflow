@@ -147,8 +147,7 @@ describe('handleRememberCall', () => {
     });
 
     it('callId is preserved in the result', () => {
-        const call = makeCall({ name: 'x', type: 'decision', description: 'd', body: 'b' });
-        call.callId = 'unique-xyz';
+        const call = { ...makeCall({ name: 'x', type: 'decision', description: 'd', body: 'b' }), callId: 'unique-xyz' };
         const result = handleRememberCall(call, 'judge', tmpDir);
         expect(result.callId).toBe('unique-xyz');
     });
