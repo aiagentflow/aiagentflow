@@ -12,6 +12,7 @@ import { McpClient } from './client.js';
 import { logger } from '../utils/logger.js';
 import type { McpServersConfig, McpToolDescriptor } from './types.js';
 import type { ToolDefinition, ToolCall, ToolResult } from '../providers/types.js';
+import type { Tool } from '../tools/registry.js';
 
 export interface RegisteredTool {
     definition: ToolDefinition;
@@ -62,6 +63,17 @@ export class McpRegistry {
         return this.toolCatalog
             .filter(t => !agentRole || !t.allowedRoles || t.allowedRoles.includes(agentRole))
             .map(t => t.definition);
+    }
+
+    /** MCP tools the given role may call, ready to add to a ToolRegistry. */
+    toolsFor(agentRole: string): Tool[] {
+        return this.getTools(agentRole).map(definition => ({
+            definition,
+            execute: async (input) => {
+                const result = await this.executeTool({ name: definition.name, input, callId: '' });
+                return { content: result.content, isError: result.isError };
+            },
+        }));
     }
 
     /** Execute a tool call by routing it to the correct server. */
