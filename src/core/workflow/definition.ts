@@ -21,6 +21,7 @@ import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { ALL_AGENT_ROLES, type AgentRole } from '../../agents/types.js';
 import { WorkflowError } from '../errors.js';
+import { externalAgentSchema } from '../../agents/external.js';
 
 /** Commands a step can run after its agent finishes. */
 export const STEP_CHECKS = ['format', 'lint', 'test'] as const;
@@ -53,6 +54,8 @@ export const workflowStepSchema = z.object({
     approval: z.boolean().default(false),
     /** Max model turns that may request tools, overriding the agent config. */
     maxTurns: z.number().int().min(1).max(100).optional(),
+    /** Run this coder/fixer/tester step with another agent CLI instead of aiagentflow's agent. */
+    external: externalAgentSchema.optional(),
 });
 
 export const workflowDefinitionSchema = z.object({
@@ -85,6 +88,9 @@ export const workflowDefinitionSchema = z.object({
         }
         if (step.uses && step.maxTurns !== undefined) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'maxTurns'], message: 'only applies to agent steps' });
+        }
+        if (step.external && !['coder', 'fixer', 'tester'].includes(step.agent ?? '')) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'external'], message: 'only coder, fixer, and tester steps can run an external agent' });
         }
         if (step.agent && step.with !== undefined) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', i, 'with'], message: 'only applies to plugin steps ("uses")' });

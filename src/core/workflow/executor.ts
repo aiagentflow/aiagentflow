@@ -20,6 +20,8 @@ import type { McpRegistry } from '../../mcp/registry.js';
 import type { AppConfig } from '../config/types.js';
 import { BudgetExceededError, ProviderError, WorkflowError } from '../errors.js';
 import type { TokenUsage } from '../../providers/types.js';
+import { EMPTY_USAGE } from '../../providers/messages.js';
+import { runExternalAgent, type ExternalAgentConfig } from '../../agents/external.js';
 import { budgetExceeded, type BudgetLimits, type BudgetSpend } from './budget-tracker.js';
 import { logger } from '../../utils/logger.js';
 import { buildTestCommand } from '../../utils/package-manager.js';
@@ -102,9 +104,11 @@ export async function executeWorkflow(params: ExecutorParams): Promise<WorkflowC
 
         let result: StepResult;
         try {
-            result = step.agent
-                ? await runAgentStep(step as AgentStep, ctx, params, startedAt)
-                : await runPluginStep(step, ctx, params);
+            result = !step.agent
+                ? await runPluginStep(step, ctx, params)
+                : step.external
+                    ? await runExternalStep(step as AgentStep & { external: ExternalAgentConfig }, ctx, params)
+                    : await runAgentStep(step as AgentStep, ctx, params, startedAt);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             logger.error(message);
@@ -212,6 +216,54 @@ async function runPluginStep(step: WorkflowStep, ctx: WorkflowContext, p: Execut
     }
     logger.success(`${step.id}: ${result.summary}`);
     return runChecks(next, step, p);
+}
+
+/**
+ * Run a coder/fixer/tester step with an external agent CLI. Its changes then
+ * go through the same output handling and checks as a built-in agent's.
+ */
+async function runExternalStep(
+    step: AgentStep & { external: ExternalAgentConfig },
+    ctx: WorkflowContext,
+    p: ExecutorParams,
+): Promise<StepResult> {
+    const { cli, model } = step.external;
+    p.events?.emit({ type: 'step.started', step: step.id, agent: step.agent });
+    logger.info(`Running ${step.id} with ${cli}${model ? ` (${model})` : ''}...`);
+
+    const run = await runExternalAgent(step.external, buildExternalPrompt(step.agent, ctx, p), p.projectRoot);
+    const usage = run.usage ?? EMPTY_USAGE;
+    p.tokenTracker.record(step.agent, model ? `${cli}:${model}` : cli, usage, run.costUsd);
+    logger.success(`${step.id}: ${cli} changed ${run.files.length} file(s)`);
+
+    const changes = new ChangeSet();
+    for (const file of run.files) changes.add(file);
+    const output: AgentOutput = { content: run.summary, role: step.agent, tokensUsed: usage.totalTokens, usage, success: true };
+    const record = { step: step.id, cli, files: run.files, diff: run.diff, ...(run.costUsd !== undefined ? { costUsd: run.costUsd } : {}), durationMs: run.durationMs };
+
+    const applied = applyOutput({ ...ctx, external: [...(ctx.external ?? []), record] }, step, output, changes, p);
+    if (applied.failure) return { ...applied, output };
+    return { ...(await runChecks(applied.ctx, step, p)), output };
+}
+
+/** The brief an external agent gets: its role, the task, and what the workflow knows so far. */
+function buildExternalPrompt(role: AgentRole, ctx: WorkflowContext, p: ExecutorParams): string {
+    const goals: Partial<Record<AgentRole, string>> = {
+        coder: 'Implement the task below.',
+        fixer: 'Fix the problem described under "What to fix", and nothing else.',
+        tester: 'Write tests for the changes described below, run them, and fix the tests if they are wrong.',
+    };
+    const previous = previousOutputFor(role, ctx);
+    const previousHeading: Partial<Record<AgentRole, string>> = { coder: 'Plan', fixer: 'What to fix', tester: 'Changes so far' };
+
+    return [
+        `You are the ${role} in an aiagentflow workflow. ${goals[role] ?? ''}`,
+        `## Task\n\n${ctx.task}`,
+        ...(previous ? [`## ${previousHeading[role] ?? 'Previous step'}\n\n${previous}`] : []),
+        buildAgentContext(ctx, p.config, role, { qaPolicy: p.qaPolicy, contextDocs: p.contextDocs }),
+        'Work directly in this repository. Do not commit, push, or open pull requests. ' +
+        'When you are done, reply with a short summary of what you changed.',
+    ].join('\n\n');
 }
 
 async function runAgentStep(step: AgentStep, ctx: WorkflowContext, p: ExecutorParams, startedAt: number): Promise<StepResult> {
