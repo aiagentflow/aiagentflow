@@ -9,6 +9,7 @@
  * Used by: providers/registry.ts
  */
 
+import { PROVIDER_DEFAULT_MODELS } from './metadata.js';
 import type { ModelInfo } from './types.js';
 import { OpenAICompatibleProvider } from './openai-compatible.js';
 import { fetchWithRetry, OLLAMA_TIMEOUT_MS } from './provider-errors.js';
@@ -21,7 +22,7 @@ export interface OllamaProviderConfig {
 /** Default Ollama settings. */
 const DEFAULTS = {
     baseUrl: 'http://localhost:11434',
-    model: 'llama3.2:latest',
+    model: PROVIDER_DEFAULT_MODELS.ollama,
 } as const;
 
 export class OllamaProvider extends OpenAICompatibleProvider {

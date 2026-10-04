@@ -10,12 +10,13 @@ if (existsSync(path)) {
     process.exit(0);
 }
 
+// Keep in sync with PROVIDER_DEFAULT_MODELS in src/providers/metadata.ts
 const DEFAULT_MODELS = {
-    anthropic: 'claude-sonnet-4-6',
-    openai: 'gpt-4o-mini',
+    anthropic: 'claude-opus-5-5',
+    openai: 'gpt-5-mini',
     groq: 'llama-3.3-70b-versatile',
-    gemini: 'gemini-2.0-flash',
-    openrouter: 'meta-llama/llama-3.1-8b-instruct:free',
+    gemini: 'gemini-2.5-flash',
+    openrouter: 'qwen/qwen3.8-27b:free',
 };
 
 const provider = process.env.PROVIDER || 'anthropic';

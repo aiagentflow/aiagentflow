@@ -19,7 +19,8 @@ const DEFAULT_AGENT_ROLE = {
     provider: 'ollama' as const,
     model: 'llama3.2:latest',
     temperature: 0.7,
-    maxTokens: 4096,
+    // Room for reasoning: thinking/reasoning models spend output tokens before answering
+    maxTokens: 16000,
 };
 
 /**
@@ -39,11 +40,11 @@ export const DEFAULT_CONFIG: AppConfig = {
 
     agents: {
         architect: { ...DEFAULT_AGENT_ROLE, temperature: 0.5 },
-        coder: { ...DEFAULT_AGENT_ROLE, temperature: 0.3, maxTokens: 8192 },
+        coder: { ...DEFAULT_AGENT_ROLE, temperature: 0.3 },
         reviewer: { ...DEFAULT_AGENT_ROLE, temperature: 0.4 },
         security: { ...DEFAULT_AGENT_ROLE, temperature: 0.2 },
         tester: { ...DEFAULT_AGENT_ROLE, temperature: 0.3 },
-        fixer: { ...DEFAULT_AGENT_ROLE, temperature: 0.3, maxTokens: 8192 },
+        fixer: { ...DEFAULT_AGENT_ROLE, temperature: 0.3 },
         judge: { ...DEFAULT_AGENT_ROLE, temperature: 0.2 },
     },
 

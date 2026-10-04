@@ -21,14 +21,18 @@ export const PROVIDER_LABELS: Record<LLMProviderName, string> = {
     openrouter: 'OpenRouter',
 };
 
-/** Default model ID to use when the user does not specify one. */
+/**
+ * Default model ID to use when the user does not specify one.
+ * Checked against each provider's model list in October 2026; refresh every release.
+ */
 export const PROVIDER_DEFAULT_MODELS: Record<LLMProviderName, string> = {
-    anthropic: 'claude-sonnet-4-20250514',
-    gemini: 'gemini-2.0-flash',
+    anthropic: 'claude-opus-5-5',
+    gemini: 'gemini-2.5-flash',
     groq: 'llama-3.3-70b-versatile',
     ollama: 'llama3.2:latest',
-    openai: 'gpt-4o-mini',
-    openrouter: 'meta-llama/llama-3.1-8b-instruct:free',
+    openai: 'gpt-5-mini',
+    // Free OpenRouter models come and go; this one supports tool calling
+    openrouter: 'qwen/qwen3.8-27b:free',
 };
 
 /** Short description shown as the choice text in the init wizard's provider selector. */

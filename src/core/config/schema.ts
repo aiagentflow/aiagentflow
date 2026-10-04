@@ -25,7 +25,7 @@ export const agentRoleConfigSchema = z.object({
     /** Sampling temperature (0.0 = deterministic, higher = more creative). */
     temperature: z.number().min(0).max(2).default(0.7),
     /** Maximum tokens the model can generate in a response. */
-    maxTokens: z.number().int().min(1).max(200000).default(4096),
+    maxTokens: z.number().int().min(1).max(200000).default(16000),
     /** Max model turns that may request tools before a final answer is forced (default 10). */
     maxTurns: z.number().int().min(1).max(100).optional(),
 });
@@ -37,7 +37,7 @@ export const agentConfigSchema = z.object({
     architect: agentRoleConfigSchema,
     coder: agentRoleConfigSchema,
     reviewer: agentRoleConfigSchema,
-    security: agentRoleConfigSchema.default({ provider: 'ollama', model: 'llama3.2:latest', temperature: 0.2, maxTokens: 4096 }),
+    security: agentRoleConfigSchema.default({ provider: 'ollama', model: 'llama3.2:latest', temperature: 0.2, maxTokens: 16000 }),
     tester: agentRoleConfigSchema,
     fixer: agentRoleConfigSchema,
     judge: agentRoleConfigSchema,

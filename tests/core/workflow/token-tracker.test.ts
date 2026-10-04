@@ -9,7 +9,13 @@ describe('costOf', () => {
     });
 
     it('falls back to the input price for cache tokens when a model lists none', () => {
-        expect(costOf({ model: 'gpt-4o-mini', promptTokens: 1_000_000, completionTokens: 0, cacheReadTokens: 500_000 })).toBeCloseTo(0.15, 6);
+        expect(costOf({ model: 'llama-3.3-70b-versatile', promptTokens: 1_000_000, completionTokens: 0, cacheReadTokens: 500_000 })).toBeCloseTo(0.59, 6);
+    });
+
+    it('uses per-model cache read prices and treats OpenRouter free models as free', () => {
+        // claude-opus-5-5: $4 in, cache reads $0.20
+        expect(costOf({ model: 'claude-opus-5-5', promptTokens: 1_000_000, completionTokens: 0, cacheReadTokens: 1_000_000 })).toBeCloseTo(0.20, 6);
+        expect(costOf({ model: 'qwen/qwen3.8-27b:free', promptTokens: 1_000_000, completionTokens: 1_000_000 })).toBe(0);
     });
 
     it('returns 0 for unknown models', () => {
